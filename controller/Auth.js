@@ -75,20 +75,119 @@ exports.signup = async (req, res) => {
 
     await newUser.save();
 
-    // Award 50 points to referrer if someone signed up using their referral code
+    // Award multiplied points to referrer if someone signed up using their referral code
     if (referredBy) {
       try {
+        // Fetch referrer's profile to calculate their tier multiplier
+        const referrer = await User.findById(referredBy);
+        
+        if (!referrer) {
+          console.error('[ReferralSignupPoints] Referrer not found:', referredBy);
+          return;
+        }
+
+        // Calculate referrer's profile completion to determine tier
+        let completed = 0;
+        const totalFields = 24;
+
+        // Personal Info (9 fields)
+        if (referrer.fullName) completed++;
+        if (referrer.email) completed++;
+        if (referrer.phoneNumber) completed++;
+        if (referrer.location) completed++;
+        if (referrer.dateOfBirth) completed++;
+        if (referrer.nationality) completed++;
+        if (referrer.professionalSummary) completed++;
+        if (referrer.emirateId) completed++;
+        if (referrer.passportNumber) completed++;
+
+        // Experience (4 fields)
+        if (referrer.professionalExperience && referrer.professionalExperience.length > 0) {
+          const exp = referrer.professionalExperience[0];
+          if (exp?.currentRole) completed++;
+          if (exp?.company) completed++;
+          if (exp?.yearsOfExperience) completed++;
+          if (exp?.industry) completed++;
+        }
+
+        // Education (4 fields)
+        if (referrer.education && referrer.education.length > 0) {
+          const edu = referrer.education[0];
+          if (edu?.highestDegree) completed++;
+          if (edu?.institution) completed++;
+          if (edu?.yearOfGraduation) completed++;
+          if (edu?.gradeCgpa) completed++;
+        }
+
+        // Skills, Preferences, Certifications, Resume (4 fields)
+        if (referrer.skills && referrer.skills.length > 0) completed++;
+        if (referrer.jobPreferences?.preferredJobType && referrer.jobPreferences.preferredJobType.length > 0) completed++;
+        if (referrer.certifications && referrer.certifications.length > 0) completed++;
+        if (referrer.jobPreferences?.resumeAndDocs && referrer.jobPreferences.resumeAndDocs.length > 0) completed++;
+
+        // Social Links (3 fields)
+        if (referrer.socialLinks?.linkedIn) completed++;
+        if (referrer.socialLinks?.instagram) completed++;
+        if (referrer.socialLinks?.twitterX) completed++;
+
+        // Helper functions for tier multiplier calculation
+        const getExperienceLevel = (yearsExp) => {
+          if (yearsExp <= 1) return 'Blue';
+          else if (yearsExp >= 2 && yearsExp <= 5) return 'Silver';
+          else return 'Gold'; // 5+ years
+        };
+
+        const getTierMultiplier = (tier, experienceLevel) => {
+          const A = 1.0;
+          if (tier === 'Platinum') {
+            if (experienceLevel === 'Blue') return 2.0;
+            else if (experienceLevel === 'Silver') return 3.0;
+            else return 4.0;
+          } else if (tier === 'Gold') return 2.0 * A;
+          else if (tier === 'Silver') return 1.5 * A;
+          else return 1.0 * A;
+        };
+
+        const determineUserTier = (basePoints, yearsExp, isEmirati) => {
+          if (isEmirati) return "Platinum";
+          else if (basePoints >= 500) return "Platinum";
+          else if (yearsExp >= 5) return "Gold";
+          else if (yearsExp >= 2 && yearsExp <= 5) return "Silver";
+          else return "Blue";
+        };
+
+        // Calculate referrer's base points and tier
+        const percentage = Math.round((completed / totalFields) * 100);
+        const basePoints = 50 + (percentage * 2);
+        const yearsExp = referrer?.professionalExperience?.[0]?.yearsOfExperience || 0;
+        const isEmirati = referrer?.nationality?.toLowerCase()?.includes("emirati");
+        const experienceLevel = getExperienceLevel(yearsExp);
+        const tier = determineUserTier(basePoints, yearsExp, isEmirati);
+        
+        // Get tier multiplier
+        const multiplier = getTierMultiplier(tier, experienceLevel);
+        
+        // Calculate multiplied referral points (base 50 points × multiplier)
+        const baseReferralPoints = 50;
+        const multipliedReferralPoints = Math.round(baseReferralPoints * multiplier);
+
+        // Award multiplied points to referrer
         const updateResult = await User.findByIdAndUpdate(referredBy, {
           $inc: { 
-            "points": 50,
-            "referralRewardPoints": 50,
-            "rewards.totalPoints": 50,
-            "rewards.referFriend": 50
+            "points": multipliedReferralPoints,
+            "referralRewardPoints": multipliedReferralPoints,
+            "rewards.totalPoints": multipliedReferralPoints,
+            "rewards.referFriend": multipliedReferralPoints
           }
         }, { new: true });
         
         if (updateResult) {
-          console.log('[ReferralSignupPoints] Successfully awarded 50 points to referrer for signup:', referredBy, {
+          console.log('[ReferralSignupPoints] Successfully awarded multiplied points to referrer for signup:', referredBy, {
+            baseReferralPoints: baseReferralPoints,
+            multiplier: multiplier,
+            tier: tier,
+            experienceLevel: experienceLevel,
+            multipliedReferralPoints: multipliedReferralPoints,
             newReferralRewardPoints: updateResult.referralRewardPoints,
             newReferFriendPoints: updateResult.rewards?.referFriend,
             newPoints: updateResult.points,
@@ -660,24 +759,7 @@ exports.updateProfile = async (req, res) => {
     if (updatedUser.socialLinks?.instagram) completed++;
     if (updatedUser.socialLinks?.twitterX) completed++;
 
-    // Helper functions for tier multiplier calculation
-    const getExperienceLevel = (yearsExp) => {
-      if (yearsExp <= 1) return 'Blue';
-      else if (yearsExp >= 2 && yearsExp <= 5) return 'Silver';
-      else return 'Gold'; // 5+ years
-    };
-
-    const getTierMultiplier = (tier, experienceLevel) => {
-      const A = 1.0;
-      if (tier === 'Platinum') {
-        if (experienceLevel === 'Blue') return 2.0;
-        else if (experienceLevel === 'Silver') return 3.0;
-        else return 4.0;
-      } else if (tier === 'Gold') return 2.0 * A;
-      else if (tier === 'Silver') return 1.5 * A;
-      else return 1.0 * A;
-    };
-
+    // Helper function for tier determination (for display purposes only)
     const determineUserTier = (basePoints, yearsExp, isEmirati) => {
       if (isEmirati) return "Platinum";
       else if (basePoints >= 500) return "Platinum";
@@ -690,17 +772,15 @@ exports.updateProfile = async (req, res) => {
     const percentage = Math.round((completed / totalFields) * 100);
     const basePoints = 50 + (percentage * 2); // Base 50 + 2 points per percentage
     
-    // Determine tier and experience level
+    // Determine tier (for display purposes only, not used in calculation)
     const yearsExp = updatedUser?.professionalExperience?.[0]?.yearsOfExperience || 0;
     const isEmirati = updatedUser?.nationality?.toLowerCase()?.includes("emirati");
-    const experienceLevel = getExperienceLevel(yearsExp);
     const tier = determineUserTier(basePoints, yearsExp, isEmirati);
     
-    // Get tier multiplier and apply to base points
-    const multiplier = getTierMultiplier(tier, experienceLevel);
-    const calculatedPoints = basePoints * multiplier;
+    // Use base points directly without multiplier
+    const calculatedPoints = basePoints;
     
-    // Add other points without multiplier
+    // Add other points
     const applicationPoints = updatedUser?.rewards?.applyForJobs || 0;
     const rmServicePoints = updatedUser?.rewards?.rmService || 0;
     const socialMediaBonus = updatedUser?.rewards?.socialMediaBonus || 0;
