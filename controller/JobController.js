@@ -11,8 +11,22 @@ exports.createJob = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized. Please login as an employer." });
     }
 
+    // Handle salary: convert from min/max object to single amount if needed
+    let salaryAmount = req.body.salary;
+    if (req.body.salary && typeof req.body.salary === 'object') {
+      // If salary is an object with min/max, use min (or average if both exist)
+      if (req.body.salary.min !== undefined) {
+        salaryAmount = req.body.salary.min;
+      } else if (req.body.salary.max !== undefined) {
+        salaryAmount = req.body.salary.max;
+      } else if (req.body.salary.amount !== undefined) {
+        salaryAmount = req.body.salary.amount;
+      }
+    }
+
     const jobData = {
       ...req.body,
+      salary: salaryAmount,
       employer: employerId,
       status: "active" // Default status for new jobs
     };
@@ -105,9 +119,22 @@ exports.updateJob = async (req, res) => {
       return res.status(403).json({ message: "Not authorized to update this job" });
     }
 
+    // Handle salary: convert from min/max object to single amount if needed
+    const updateData = { ...req.body };
+    if (req.body.salary && typeof req.body.salary === 'object') {
+      // If salary is an object with min/max, use min (or average if both exist)
+      if (req.body.salary.min !== undefined) {
+        updateData.salary = req.body.salary.min;
+      } else if (req.body.salary.max !== undefined) {
+        updateData.salary = req.body.salary.max;
+      } else if (req.body.salary.amount !== undefined) {
+        updateData.salary = req.body.salary.amount;
+      }
+    }
+
     const updatedJob = await Job.findByIdAndUpdate(
       jobId,
-      { $set: req.body },
+      { $set: updateData },
       { new: true }
     );
 
@@ -614,28 +641,38 @@ function calculateSimpleRecommendationScore(job, user) {
 
     // 5. Salary expectation match (10% weight) - Check if salary is in acceptable range
     if (job.salary && user.jobPreferences?.salaryExpectation) {
-      const jobMin = job.salary.min || 0;
-      const jobMax = job.salary.max || 0;
-      const jobAvg = (jobMin + jobMax) / 2;
+      // Handle both old format (object with min/max) and new format (single number)
+      let jobSalary = 0;
+      if (typeof job.salary === 'object' && job.salary !== null) {
+        // Old format: object with min/max
+        const jobMin = job.salary.min || 0;
+        const jobMax = job.salary.max || 0;
+        jobSalary = (jobMin + jobMax) / 2;
+      } else if (typeof job.salary === 'number') {
+        // New format: single number
+        jobSalary = job.salary;
+      }
       
       // Parse user's salary expectation (could be a range or single value)
       const userSalaryStr = String(user.jobPreferences.salaryExpectation).replace(/[^\d]/g, '');
       const userSalary = parseInt(userSalaryStr) || 0;
       
-      if (userSalary > 0 && jobAvg > 0) {
+      if (userSalary > 0 && jobSalary > 0) {
+        const salaryDiff = Math.abs(userSalary - jobSalary) / jobSalary;
+        
         // If user expects more than 5x the job offers, it's a significant mismatch
-        if (userSalary > jobMax * 5) {
+        if (userSalary > jobSalary * 5) {
           score -= 8; // Significant salary mismatch (reduced penalty)
-        } else if (userSalary > jobMax * 3) {
+        } else if (userSalary > jobSalary * 3) {
           score -= 5; // Moderate salary mismatch (reduced penalty)
-        } else if (userSalary > jobMax * 2) {
+        } else if (userSalary > jobSalary * 2) {
           score -= 2; // Minor salary mismatch
-        } else if (userSalary >= jobMin * 0.8 && userSalary <= jobMax * 1.2) {
-          score += 10; // Good salary match
-        } else if (userSalary >= jobMin * 0.5) {
-          score += 5; // Acceptable salary range
+        } else if (salaryDiff <= 0.2) {
+          score += 10; // Good salary match (within 20%)
+        } else if (salaryDiff <= 0.5) {
+          score += 5; // Acceptable salary range (within 50%)
         } else {
-          // User expects less than job minimum - might be underqualified or willing to accept lower
+          // User expects less than job salary - might be underqualified or willing to accept lower
           score += 3; // Small bonus for flexibility
         }
       }

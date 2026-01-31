@@ -482,11 +482,17 @@ exports.updateApplicationStatus = async (req, res) => {
           const job = await Job.findById(application.jobId).select('salary title companyName');
           
           if (job && job.salary) {
-            // Calculate 1% of total salary (using average of min and max)
-            const salaryMin = job.salary.min || 0;
-            const salaryMax = job.salary.max || 0;
-            const averageSalary = (salaryMin + salaryMax) / 2;
-            const placementPoints = Math.round(averageSalary * 0.01); // 1% of salary as placement points
+            let jobSalary = 0;
+            if (typeof job.salary === 'object' && job.salary !== null) {
+              // Old format: object with min/max
+              const salaryMin = job.salary.min || 0;
+              const salaryMax = job.salary.max || 0;
+              jobSalary = (salaryMin + salaryMax) / 2;
+            } else if (typeof job.salary === 'number') {
+              // New format: single number
+              jobSalary = job.salary;
+            }
+            const placementPoints = Math.round(jobSalary * 0.01); // 1% of salary as placement points
             
             // Handle both populated and unpopulated referredBy field
             let referrerId;
@@ -513,9 +519,7 @@ exports.updateApplicationStatus = async (req, res) => {
                 referrerId: referrerId,
                 jobTitle: job.title,
                 companyName: job.companyName,
-                salaryMin: salaryMin,
-                salaryMax: salaryMax,
-                averageSalary: averageSalary,
+                jobSalary: jobSalary,
                 placementPoints: placementPoints,
                 newReferralRewardPoints: updateResult.referralRewardPoints,
                 newPoints: updateResult.points,
@@ -1352,9 +1356,25 @@ exports.getUserReferralHistory = async (req, res) => {
 
       // 4. Salary Expectations (15% weight)
       if (job?.salary && application?.expectedSalary) {
-        const jobSalaryMid = (job.salary.min + job.salary.max) / 2;
-        const expectedSalaryMid = (application.expectedSalary.min + application.expectedSalary.max) / 2;
-        const salaryDiff = Math.abs(jobSalaryMid - expectedSalaryMid) / jobSalaryMid;
+        // Handle both old format (object with min/max) and new format (single number) for job salary
+        let jobSalaryMid = 0;
+        if (typeof job.salary === 'object' && job.salary !== null) {
+          // Old format: object with min/max
+          jobSalaryMid = (job.salary.min + job.salary.max) / 2;
+        } else if (typeof job.salary === 'number') {
+          // New format: single number
+          jobSalaryMid = job.salary;
+        }
+        
+        // Handle application expectedSalary (might still be min/max format)
+        let expectedSalaryMid = 0;
+        if (typeof application.expectedSalary === 'object' && application.expectedSalary !== null) {
+          expectedSalaryMid = (application.expectedSalary.min + application.expectedSalary.max) / 2;
+        } else if (typeof application.expectedSalary === 'number') {
+          expectedSalaryMid = application.expectedSalary;
+        }
+        
+        const salaryDiff = jobSalaryMid > 0 ? Math.abs(jobSalaryMid - expectedSalaryMid) / jobSalaryMid : 0;
         
         let salaryScore = 0;
         if (salaryDiff <= 0.1) salaryScore = 15; // Within 10%
