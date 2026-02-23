@@ -1,5 +1,6 @@
 const User = require("../model/UserSchemas");
 const Employer = require("../model/EmployerSchema");
+const ProfileAccessRequest = require("../model/ProfileAccessRequestSchema");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 require("dotenv").config();
@@ -1239,6 +1240,433 @@ exports.testEmailConfig = async (req, res) => {
       message: "Failed to test email configuration",
       error: error.message,
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+
+// Search user by email or phone (jobseeker only)
+exports.searchUserByIdentifier = async (req, res) => {
+  try {
+    const rawIdentifier = req.query.identifier;
+
+    if (!rawIdentifier || typeof rawIdentifier !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Search identifier (email or phone) is required",
+      });
+    }
+
+    const identifier = rawIdentifier.trim();
+
+    if (!identifier) {
+      return res.status(400).json({
+        success: false,
+        message: "Search identifier cannot be empty",
+      });
+    }
+
+    // Build query: restrict to jobseeker accounts only
+    const baseFilter = { role: "jobseeker" };
+    let query;
+
+    if (identifier.includes("@")) {
+      // Email lookup (case-insensitive)
+      query = {
+        ...baseFilter,
+        email: identifier.toLowerCase(),
+      };
+    } else {
+      // Phone lookup - use exact match to avoid false positives
+      query = {
+        ...baseFilter,
+        phoneNumber: identifier,
+      };
+    }
+
+    const user = await User.findOne(query).select("email fullName name role");
+
+    if (!user) {
+      return res.status(200).json({
+        success: true,
+        exists: false,
+        message: "User does not exist in the portal",
+      });
+    }
+
+    const displayName = user.fullName || user.name || user.email.split("@")[0];
+
+    return res.status(200).json({
+      success: true,
+      exists: true,
+      message: "User exists in the portal",
+      data: {
+        id: user._id,
+        name: displayName,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    console.error("searchUserByIdentifier error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to search user",
+      error: error.message,
+    });
+  }
+};
+
+// Get users who joined using the current user's referral code (with basic details + pagination)
+exports.getReferralJoiners = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized. Please login first.",
+      });
+    }
+
+    // This page is for jobseekers managing their referral program
+    if (userRole !== "jobseeker") {
+      return res.status(403).json({
+        success: false,
+        message: "Only jobseekers can view referral joiners.",
+      });
+    }
+
+    // Parse pagination parameters
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limitRaw = parseInt(req.query.limit, 10) || 10;
+    const limit = Math.min(Math.max(limitRaw, 1), 50); // cap to avoid abuse
+
+    // Fetch all joiners (jobseekers + employers), then paginate in memory
+    const [jobseekerJoiners, employerJoiners] = await Promise.all([
+      User.find({ referredBy: userId })
+        .select("fullName name email role createdAt phoneNumber location")
+        .sort({ createdAt: -1 }),
+      Employer.find({ referredBy: userId })
+        .select("companyName name email role createdAt phoneNumber companyLocation")
+        .sort({ createdAt: -1 }),
+    ]);
+
+    const joiners = [
+      ...jobseekerJoiners.map((u) => ({
+        id: u._id,
+        name: u.fullName || u.name || (u.email ? u.email.split("@")[0] : "User"),
+        email: u.email,
+        role: u.role || "jobseeker",
+        joinedAt: u.createdAt,
+        phoneNumber: u.phoneNumber || "",
+        location: u.location || "",
+      })),
+      ...employerJoiners.map((e) => ({
+        id: e._id,
+        name: e.companyName || e.name || (e.email ? e.email.split("@")[0] : "Employer"),
+        email: e.email,
+        role: "employer",
+        joinedAt: e.createdAt,
+        phoneNumber: e.phoneNumber || "",
+        location: e.companyLocation || "",
+      })),
+    ];
+
+    // Sort by most recent joiners first
+    joiners.sort((a, b) => new Date(b.joinedAt).getTime() - new Date(a.joinedAt).getTime());
+
+    const total = joiners.length;
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
+    const startIndex = (page - 1) * limit;
+    const paginatedJoiners = joiners.slice(startIndex, startIndex + limit);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        total,
+        page,
+        limit,
+        totalPages,
+        joiners: paginatedJoiners,
+      },
+    });
+  } catch (error) {
+    console.error("getReferralJoiners error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch referral joiners",
+      error: error.message,
+    });
+  }
+};
+
+// Get full profile of a single user who joined using the current user's referral code (or granted access)
+exports.getReferralJoinerProfile = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+    const { id } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized. Please login first.",
+      });
+    }
+
+    if (userRole !== "jobseeker") {
+      return res.status(403).json({
+        success: false,
+        message: "Only jobseekers can view referral joiner profiles.",
+      });
+    }
+
+    // 1) Try to find a jobseeker referred by the current user
+    let referredUser = await User.findOne({ _id: id, referredBy: userId }).select("-password");
+    let type = "jobseeker";
+
+    if (!referredUser) {
+      // 2) Try employer referred by the current user
+      referredUser = await Employer.findOne({ _id: id, referredBy: userId }).select("-password");
+      type = "employer";
+    }
+
+    // 3) If not referred, check if access was granted via profile access request
+    if (!referredUser) {
+      const granted = await ProfileAccessRequest.findOne({
+        requesterId: userId,
+        targetUserId: id,
+        status: "granted",
+      });
+      if (granted) {
+        referredUser = await User.findById(id).select("-password");
+        type = "jobseeker";
+        if (!referredUser) {
+          referredUser = await Employer.findById(id).select("-password");
+          type = "employer";
+        }
+      }
+    }
+
+    if (!referredUser) {
+      return res.status(404).json({
+        success: false,
+        message: "Referred user not found or not linked to your referral code.",
+      });
+    }
+
+    let profile;
+    if (type === "jobseeker" && typeof referredUser.getPublicProfile === "function") {
+      profile = referredUser.getPublicProfile();
+    } else if (type === "employer" && typeof referredUser.getPublicProfile === "function") {
+      profile = referredUser.getPublicProfile();
+    } else {
+      profile = referredUser.toObject();
+      delete profile.password;
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        type,
+        profile,
+      },
+    });
+  } catch (error) {
+    console.error("getReferralJoinerProfile error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch referral joiner profile",
+      error: error.message,
+    });
+  }
+};
+
+// Request access to view a user's profile (when they were not referred by you)
+exports.requestProfileAccess = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+    const targetUserId = req.body?.targetUserId;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized. Please login first.",
+      });
+    }
+
+    if (userRole !== "jobseeker") {
+      return res.status(403).json({
+        success: false,
+        message: "Only jobseekers can request profile access.",
+      });
+    }
+
+    if (!targetUserId) {
+      return res.status(400).json({
+        success: false,
+        message: "targetUserId is required.",
+      });
+    }
+
+    // Requester cannot request their own profile
+    if (targetUserId === userId) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot request access to your own profile.",
+      });
+    }
+
+    // Check if already has access (referred or granted)
+    const referred = await User.findOne({ _id: targetUserId, referredBy: userId }) ||
+      await Employer.findOne({ _id: targetUserId, referredBy: userId });
+    if (referred) {
+      return res.status(200).json({
+        success: true,
+        message: "You already have access to this profile.",
+        alreadyGranted: true,
+      });
+    }
+
+    const existingGrant = await ProfileAccessRequest.findOne({
+      requesterId: userId,
+      targetUserId,
+      status: "granted",
+    });
+    if (existingGrant) {
+      return res.status(200).json({
+        success: true,
+        message: "You already have access to this profile.",
+        alreadyGranted: true,
+      });
+    }
+
+    // Optional: one pending request per requester+target
+    const pending = await ProfileAccessRequest.findOne({
+      requesterId: userId,
+      targetUserId,
+      status: "pending",
+      expiresAt: { $gt: new Date() },
+    });
+    if (pending) {
+      return res.status(200).json({
+        success: true,
+        message: "Access request already sent to the target user.",
+        alreadyRequested: true,
+      });
+    }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    const targetUser = await User.findById(targetUserId).select("fullName name email");
+    const targetEmployer = await targetUser ? null : await Employer.findById(targetUserId).select("companyName name email");
+    const targetType = targetUser ? "jobseeker" : "employer";
+    const targetName = targetUser
+      ? (targetUser.fullName || targetUser.name || targetUser.email?.split("@")[0] || "User")
+      : (targetEmployer?.companyName || targetEmployer?.name || targetEmployer?.email?.split("@")[0] || "User");
+
+    if (!targetUser && !targetEmployer) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    await ProfileAccessRequest.create({
+      requesterId: userId,
+      targetUserId,
+      targetType,
+      token,
+      expiresAt,
+      status: "pending",
+    });
+
+    const requester = await User.findById(userId).select("email fullName name");
+    if (!requester) {
+      return res.status(400).json({
+        success: false,
+        message: "Requester not found.",
+      });
+    }
+
+    const targetEmail = targetUser?.email || targetEmployer?.email;
+    if (!targetEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "Target user email not found.",
+      });
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+    const accessLink = `${frontendUrl}/jobseeker/profile-access?token=${token}&userId=${targetUserId}`;
+
+    const { sendProfileAccessEmail } = require("../profileAccessEmail");
+    const requesterName = requester.fullName || requester.name || requester.email?.split("@")[0] || "A user";
+    const emailResult = await sendProfileAccessEmail(targetEmail, accessLink, requesterName);
+
+    if (!emailResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send access email. Please try again later.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Request sent to target user. Access will be granted after they approve from email link.",
+    });
+  } catch (error) {
+    console.error("requestProfileAccess error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to request profile access",
+      error: error.message,
+    });
+  }
+};
+
+// Confirm profile access (magic link) - no auth required
+exports.confirmProfileAccess = async (req, res) => {
+  try {
+    const token = req.query?.token || req.body?.token;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: "Token is required.",
+      });
+    }
+
+    const request = await ProfileAccessRequest.findOne({
+      token,
+      status: "pending",
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (!request) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired link. Please request access again.",
+      });
+    }
+
+    request.status = "granted";
+    await request.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Access granted successfully.",
+      userId: request.targetUserId.toString(),
+    });
+  } catch (error) {
+    console.error("confirmProfileAccess error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to confirm access",
+      error: error.message,
     });
   }
 };
