@@ -41,14 +41,14 @@ exports.createJob = async (req, res) => {
 
     setImmediate(async () => {
       try {
-        await Employer.findByIdAndUpdate(employerId, { $inc: { points: 30 } });
-        
+        await Employer.findByIdAndUpdate(employerId, { $inc: { points: 100 } });
+
         const { sendJobPostedEmail, sendJobNotificationEmail } = require('../jobPost');
         const employer = await Employer.findById(employerId).select('email name companyName');
         const employerEmail = employer?.email;
         const employerName = employer?.name || employer?.companyName || 'Employer';
         const companyName = employer?.companyName || 'Company';
-        
+
         if (employerEmail) {
           await sendJobPostedEmail(
             employerEmail,
@@ -62,7 +62,7 @@ exports.createJob = async (req, res) => {
         // Send job notification emails to all job seekers
         const jobSeekers = await User.find({ role: 'jobseeker' }).select('email fullName name');
         const jobType = Array.isArray(newJob.jobType) ? newJob.jobType.join(', ') : newJob.jobType;
-        
+
         const batchSize = 10;
         for (let i = 0; i < jobSeekers.length; i += batchSize) {
           const batch = jobSeekers.slice(i, i + batchSize);
@@ -83,9 +83,9 @@ exports.createJob = async (req, res) => {
               }
             }
           });
-          
+
           await Promise.allSettled(emailPromises);
-          
+
           if (i + batchSize < jobSeekers.length) {
             await new Promise(resolve => setTimeout(resolve, 1000));
           }
@@ -96,9 +96,9 @@ exports.createJob = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ 
-      message: "Failed to create job", 
-      error: error.message 
+    res.status(500).json({
+      message: "Failed to create job",
+      error: error.message
     });
   }
 };
@@ -144,9 +144,9 @@ exports.updateJob = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ 
-      message: "Failed to update job", 
-      error: error.message 
+    res.status(500).json({
+      message: "Failed to update job",
+      error: error.message
     });
   }
 };
@@ -204,9 +204,9 @@ exports.getJobs = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ 
-      message: "Failed to fetch jobs", 
-      error: error.message 
+    res.status(500).json({
+      message: "Failed to fetch jobs",
+      error: error.message
     });
   }
 };
@@ -227,7 +227,7 @@ exports.getJob = async (req, res) => {
     // Check if the viewer is the job owner
     const viewerId = req.user?.id;
     const isOwner = viewerId && job.employer.toString() === viewerId;
-    
+
     // If job is closed and viewer is not the owner, return 404
     if (job.status === 'closed' && !isOwner) {
       return res.status(404).json({ message: "Job not found" });
@@ -236,7 +236,7 @@ exports.getJob = async (req, res) => {
     // Increment view count only if viewer is not the job owner and job is active
     // This ensures employers don't inflate their own job view counts
     console.log('Job View - ViewerId:', viewerId, 'Job Owner:', job.employer.toString(), 'Is Owner:', isOwner);
-    
+
     if (!isOwner && job.status === 'active') {
       job.views = (job.views || 0) + 1;
       await job.save();
@@ -255,9 +255,9 @@ exports.getJob = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ 
-      message: "Failed to fetch job", 
-      error: error.message 
+    res.status(500).json({
+      message: "Failed to fetch job",
+      error: error.message
     });
   }
 };
@@ -289,11 +289,23 @@ exports.closeJob = async (req, res) => {
       message: "Job closed successfully",
       data: updatedJob
     });
+    setImmediate(async () => {
+      try {
+        const hiredApplication = await Application.findOne({ jobId, status: "hired" });
+
+        if (hiredApplication && job.salary > 0) {
+          const pointsToAward = Math.round(job.salary * 0.015);
+          await Employer.findByIdAndUpdate(employerId, { $inc: { points: pointsToAward } });
+        }
+      } catch (err) {
+        console.error("[Points] Failed to award points on job close:", err);
+      }
+    });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ 
-      message: "Failed to close job", 
-      error: error.message 
+    res.status(500).json({
+      message: "Failed to close job",
+      error: error.message
     });
   }
 };
@@ -314,7 +326,6 @@ exports.getEmployerJobs = async (req, res) => {
     } = req.query;
 
     const query = { employer: employerId };
-    
     // Only filter by status if explicitly provided
     if (status) {
       query.status = status;
@@ -348,9 +359,9 @@ exports.getEmployerJobs = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ 
-      message: "Failed to fetch employer jobs", 
-      error: error.message 
+    res.status(500).json({
+      message: "Failed to fetch employer jobs",
+      error: error.message
     });
   }
 };
@@ -380,9 +391,9 @@ exports.publishJob = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ 
-      message: "Failed to publish job", 
-      error: error.message 
+    res.status(500).json({
+      message: "Failed to publish job",
+      error: error.message
     });
   }
 };
@@ -400,7 +411,7 @@ exports.getJobRecommendations = async (req, res) => {
     }
 
     // Get jobs user has already applied to (excluding withdrawn applications)
-    const appliedJobIds = await Application.find({ 
+    const appliedJobIds = await Application.find({
       applicantId: userId,
       status: { $ne: 'withdrawn' } // Exclude withdrawn applications
     }).distinct('jobId');
@@ -421,7 +432,7 @@ exports.getJobRecommendations = async (req, res) => {
       const allActiveJobs = await Job.find({ status: 'active' })
         .sort({ createdAt: -1 })
         .limit(parseInt(limit));
-      
+
       if (allActiveJobs.length === 0) {
         return res.json({
           message: "No job recommendations available",
@@ -475,9 +486,9 @@ exports.getJobRecommendations = async (req, res) => {
 
   } catch (error) {
     console.error("Get job recommendations error:", error);
-    res.status(500).json({ 
-      message: "Failed to get job recommendations", 
-      error: error.message 
+    res.status(500).json({
+      message: "Failed to get job recommendations",
+      error: error.message
     });
   }
 };
@@ -492,21 +503,21 @@ function calculateSimpleRecommendationScore(job, user) {
       if (user.skills && Array.isArray(user.skills) && user.skills.length > 0) {
         const jobSkills = job.skills.map(skill => String(skill).trim().toLowerCase()).filter(s => s.length > 0);
         const userSkills = user.skills.map(skill => String(skill).trim().toLowerCase()).filter(s => s.length > 0);
-        
+
         // Only count meaningful skills (not single letters or invalid entries)
         const validJobSkills = jobSkills.filter(skill => skill.length > 1 && !/^[^a-z0-9]+$/.test(skill));
         const validUserSkills = userSkills.filter(skill => skill.length > 1 && !/^[^a-z0-9]+$/.test(skill));
-        
+
         if (validJobSkills.length > 0 && validUserSkills.length > 0) {
-          const matchingSkills = validJobSkills.filter(jobSkill => 
+          const matchingSkills = validJobSkills.filter(jobSkill =>
             validUserSkills.some(userSkill => {
               // Exact match or one contains the other (for variations like "java" and "java programming")
-              return userSkill === jobSkill || 
-                     (userSkill.length > 3 && jobSkill.length > 3 && 
-                      (userSkill.includes(jobSkill) || jobSkill.includes(userSkill)));
+              return userSkill === jobSkill ||
+                (userSkill.length > 3 && jobSkill.length > 3 &&
+                  (userSkill.includes(jobSkill) || jobSkill.includes(userSkill)));
             })
           );
-          
+
           const skillMatchPercent = (matchingSkills.length / validJobSkills.length) * 35;
           score += skillMatchPercent;
         } else {
@@ -521,7 +532,7 @@ function calculateSimpleRecommendationScore(job, user) {
 
     // 2. Experience level match (25% weight) - Check actual years of experience
     let userYearsExp = 0;
-    
+
     // Get actual years of experience from user profile
     if (user.professionalExperience && Array.isArray(user.professionalExperience) && user.professionalExperience.length > 0) {
       const firstExp = user.professionalExperience[0];
@@ -538,10 +549,10 @@ function calculateSimpleRecommendationScore(job, user) {
         else if (expStr.includes('0-1') || /^1/.test(expStr)) userYearsExp = 1;
       }
     }
-    
+
     let expScore = 0;
     let jobExpLevel = '';
-    
+
     // Check if job has experienceLevel field
     if (job.experienceLevel) {
       jobExpLevel = String(job.experienceLevel).toLowerCase();
@@ -556,7 +567,7 @@ function calculateSimpleRecommendationScore(job, user) {
         jobExpLevel = 'senior';
       }
     }
-    
+
     if (jobExpLevel.includes('entry') || jobExpLevel.includes('junior') || jobExpLevel.includes('intern')) {
       // Entry level: 0-2 years ideal, 3-4 acceptable, 5+ overqualified (but less penalty)
       if (userYearsExp <= 2) expScore = 25;
@@ -579,18 +590,18 @@ function calculateSimpleRecommendationScore(job, user) {
       if (userYearsExp > 0) expScore = 15; // User has experience, give moderate score
       else expScore = 10; // No experience specified
     }
-    
+
     score += expScore;
 
     // 3. Location match (20% weight) - Check both current location and preferred location
     if (job.location) {
       const jobLoc = String(job.location).toLowerCase();
       const userCurrentLoc = user.location ? String(user.location).toLowerCase() : '';
-      const userPreferredLoc = user.jobPreferences?.preferredLocation ? 
+      const userPreferredLoc = user.jobPreferences?.preferredLocation ?
         String(user.jobPreferences.preferredLocation).toLowerCase() : '';
-      
+
       let locationMatch = false;
-      
+
       // Check if job location matches user's preferred location (more important)
       if (userPreferredLoc && (jobLoc.includes(userPreferredLoc) || userPreferredLoc.includes(jobLoc))) {
         score += 20;
@@ -620,18 +631,18 @@ function calculateSimpleRecommendationScore(job, user) {
       const jobTypes = job.jobType.map(t => String(t).toLowerCase());
       const userPreferredTypes = user.jobPreferences?.preferredJobType || [];
       const userTypes = userPreferredTypes.map(t => String(t).toLowerCase());
-      
-      const hasMatch = jobTypes.some(jobType => 
+
+      const hasMatch = jobTypes.some(jobType =>
         userTypes.some(userType => {
           // Normalize variations (e.g., "Part Time" vs "Part-time" vs "parttime")
           const normalizedJobType = jobType.replace(/[\s-]/g, '');
           const normalizedUserType = userType.replace(/[\s-]/g, '');
-          return normalizedJobType === normalizedUserType || 
-                 jobType.includes(userType) || 
-                 userType.includes(jobType);
+          return normalizedJobType === normalizedUserType ||
+            jobType.includes(userType) ||
+            userType.includes(jobType);
         })
       );
-      
+
       if (hasMatch) {
         score += 10;
       } else {
@@ -652,14 +663,14 @@ function calculateSimpleRecommendationScore(job, user) {
         // New format: single number
         jobSalary = job.salary;
       }
-      
+
       // Parse user's salary expectation (could be a range or single value)
       const userSalaryStr = String(user.jobPreferences.salaryExpectation).replace(/[^\d]/g, '');
       const userSalary = parseInt(userSalaryStr) || 0;
-      
+
       if (userSalary > 0 && jobSalary > 0) {
         const salaryDiff = Math.abs(userSalary - jobSalary) / jobSalary;
-        
+
         // If user expects more than 5x the job offers, it's a significant mismatch
         if (userSalary > jobSalary * 5) {
           score -= 8; // Significant salary mismatch (reduced penalty)
