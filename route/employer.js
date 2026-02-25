@@ -4,6 +4,7 @@ const {
   getEmployerProfileDetails,
   updateEmployerProfile,
   getEmployerDashboardStats,
+  getEmployerDashboard,
   updateSubscription,
   updateHRServices,
   updateNotificationPreferences,
@@ -25,6 +26,7 @@ router.get("/employer/eligibility", authMiddleware, checkEmployerEligibility);
 router.get("/company/:employerId", getPublicCompanyProfile);
 
 // Dashboard routes
+router.get("/employer/dashboard", authMiddleware, getEmployerDashboard);
 router.get("/employer/dashboard/stats", authMiddleware, getEmployerDashboardStats);
 
 // Subscription management

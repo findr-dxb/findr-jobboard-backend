@@ -1386,11 +1386,11 @@ exports.getUserReferralHistory = async (req, res) => {
     const referralApplications = await Application.find({ referredBy: referrerId })
       .populate({
         path: 'jobId',
-        select: 'title companyName location salary skills experienceLevel requirements'
+        select: 'title companyName'
       })
       .populate({
         path: 'applicantId',
-        select: 'name email phoneNumber location skills professionalExperience education'
+        select: 'name email phoneNumber'
       })
       .sort({ appliedDate: -1 })
       .limit(limit * 1)
@@ -1398,163 +1398,17 @@ exports.getUserReferralHistory = async (req, res) => {
 
     const total = await Application.countDocuments({ referredBy: referrerId });
 
-    // Calculate match score based on actual criteria
-    const calculateMatchScore = (application) => {
-      let totalScore = 0;
-      let maxPossibleScore = 0;
-      
-      const job = application.jobId;
-      const applicant = application.applicantId;
-      
-      // 1. Skills Match (30% weight)
-      if (job?.skills && applicant?.skills) {
-        const jobSkills = job.skills.map(skill => skill.toLowerCase());
-        const applicantSkills = applicant.skills.map(skill => skill.toLowerCase());
-        const matchingSkills = jobSkills.filter(skill => 
-          applicantSkills.some(appSkill => appSkill.includes(skill) || skill.includes(appSkill))
-        );
-        const skillsScore = jobSkills.length > 0 ? (matchingSkills.length / jobSkills.length) * 30 : 15;
-        totalScore += skillsScore;
-      } else {
-        totalScore += 15; // Default moderate score if data missing
-      }
-      maxPossibleScore += 30;
-
-      // 2. Experience Level (25% weight)
-      if (job?.experienceLevel && applicant?.professionalExperience) {
-        const jobExpLevel = job.experienceLevel.toLowerCase();
-        const applicantYears = applicant.professionalExperience.length || 0;
-        
-        let expScore = 0;
-        if (jobExpLevel.includes('entry') || jobExpLevel.includes('junior')) {
-          expScore = applicantYears <= 2 ? 25 : applicantYears <= 5 ? 20 : 15;
-        } else if (jobExpLevel.includes('mid') || jobExpLevel.includes('intermediate')) {
-          expScore = applicantYears >= 2 && applicantYears <= 7 ? 25 : 18;
-        } else if (jobExpLevel.includes('senior') || jobExpLevel.includes('lead')) {
-          expScore = applicantYears >= 5 ? 25 : applicantYears >= 3 ? 20 : 15;
-        } else {
-          expScore = 18; // Default for unspecified
-        }
-        totalScore += expScore;
-      } else {
-        totalScore += 18; // Default moderate score
-      }
-      maxPossibleScore += 25;
-
-      // 3. Location Match (15% weight)
-      if (job?.location && applicant?.location) {
-        const jobLocation = job.location.toLowerCase();
-        const applicantLocation = applicant.location.toLowerCase();
-        const locationScore = jobLocation.includes(applicantLocation) || 
-                            applicantLocation.includes(jobLocation) ? 15 : 8;
-        totalScore += locationScore;
-      } else {
-        totalScore += 10; // Default moderate score
-      }
-      maxPossibleScore += 15;
-
-      // 4. Salary Expectations (15% weight)
-      if (job?.salary && application?.expectedSalary) {
-        // Handle both old format (object with min/max) and new format (single number) for job salary
-        let jobSalaryMid = 0;
-        if (typeof job.salary === 'object' && job.salary !== null) {
-          // Old format: object with min/max
-          jobSalaryMid = (job.salary.min + job.salary.max) / 2;
-        } else if (typeof job.salary === 'number') {
-          // New format: single number
-          jobSalaryMid = job.salary;
-        }
-        
-        // Handle application expectedSalary (might still be min/max format)
-        let expectedSalaryMid = 0;
-        if (typeof application.expectedSalary === 'object' && application.expectedSalary !== null) {
-          expectedSalaryMid = (application.expectedSalary.min + application.expectedSalary.max) / 2;
-        } else if (typeof application.expectedSalary === 'number') {
-          expectedSalaryMid = application.expectedSalary;
-        }
-        
-        const salaryDiff = jobSalaryMid > 0 ? Math.abs(jobSalaryMid - expectedSalaryMid) / jobSalaryMid : 0;
-        
-        let salaryScore = 0;
-        if (salaryDiff <= 0.1) salaryScore = 15; // Within 10%
-        else if (salaryDiff <= 0.2) salaryScore = 12; // Within 20%
-        else if (salaryDiff <= 0.3) salaryScore = 8; // Within 30%
-        else salaryScore = 5; // More than 30% difference
-        
-        totalScore += salaryScore;
-      } else {
-        totalScore += 10; // Default moderate score
-      }
-      maxPossibleScore += 15;
-
-      // 5. Education Requirements (15% weight)
-      if (job?.requirements && applicant?.education) {
-        const jobReqs = job.requirements.join(' ').toLowerCase();
-        const hasEducationReq = jobReqs.includes('degree') || jobReqs.includes('bachelor') || 
-                               jobReqs.includes('master') || jobReqs.includes('phd') || 
-                               jobReqs.includes('diploma');
-        
-        if (hasEducationReq && applicant.education.length > 0) {
-          const highestEducation = applicant.education[0]?.degree?.toLowerCase() || '';
-          let educationScore = 0;
-          
-          if (highestEducation.includes('phd') || highestEducation.includes('doctorate')) {
-            educationScore = 15;
-          } else if (highestEducation.includes('master')) {
-            educationScore = 14;
-          } else if (highestEducation.includes('bachelor')) {
-            educationScore = 12;
-          } else if (highestEducation.includes('diploma')) {
-            educationScore = 10;
-          } else {
-            educationScore = 8;
-          }
-          totalScore += educationScore;
-        } else if (!hasEducationReq) {
-          totalScore += 12; // No specific education requirement
-        } else {
-          totalScore += 6; // Education required but not provided
-        }
-      } else {
-        totalScore += 10; // Default moderate score
-      }
-      maxPossibleScore += 15;
-
-      // Calculate final percentage
-      let baseScore = (totalScore / maxPossibleScore) * 100;
-      
-      // Apply status-based adjustments (smaller impact now)
-      switch (application.status) {
-        case 'hired':
-          baseScore = Math.min(baseScore + 5, 98); // Small bonus for hired
-          break;
-        case 'interview_scheduled':
-          baseScore = Math.min(baseScore + 3, 95); // Small bonus for interviews
-          break;
-        case 'shortlisted':
-          baseScore = Math.min(baseScore + 2, 92); // Small bonus for shortlisted
-          break;
-        case 'rejected':
-          baseScore = Math.max(baseScore - 10, 25); // Penalty for rejected
-          break;
-        // 'pending' gets no adjustment
-      }
-
-      return Math.round(baseScore);
-    };
-
     // Transform data for frontend
     const referralHistory = referralApplications.map(app => ({
       id: app._id,
       referredUser: app.applicantId?.name || 'Unknown User',
       referredUserEmail: app.applicantId?.email || '',
+      contactNo: app.applicantId?.phoneNumber || '',
       jobTitle: app.jobId?.title || 'Unknown Job',
       company: app.jobId?.companyName || 'Unknown Company',
       date: app.appliedDate,
       status: app.status,
-      lastUpdate: app.updatedAt,
       applicationId: app._id,
-      matchScore: calculateMatchScore(app)
     }));
 
     // Get stats

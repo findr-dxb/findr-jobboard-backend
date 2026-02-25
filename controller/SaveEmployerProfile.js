@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Employer = require("../model/EmployerSchema");
 const Job = require("../model/JobSchema");
 const Application = require("../model/ApplicationSchema");
@@ -764,6 +765,133 @@ exports.checkEmployerEligibility = async (req, res) => {
       message: "Failed to check employer eligibility",
       error: error.message 
     });
+  }
+};
+
+// Single fast dashboard endpoint — replaces profile + stats + jobs + per-job applications calls
+exports.getEmployerDashboard = async (req, res) => {
+  try {
+    const employerId = req.user?.id;
+    if (!employerId) {
+      return res.status(401).json({ success: false, message: "Unauthorized." });
+    }
+
+    const empObjId = new mongoose.Types.ObjectId(employerId);
+
+    // Run all DB work in parallel — no sequential awaits
+    const [employer, jobAgg, appAgg, recentApplications] = await Promise.all([
+
+      // 1. Minimal employer info for the welcome banner
+      Employer.findById(employerId)
+        .select("name companyName companyLogo")
+        .lean(),
+
+      // 2. Job stats + top 3 active jobs — single aggregation with $facet
+      Job.aggregate([
+        { $match: { employer: empObjId } },
+        {
+          $facet: {
+            stats: [
+              {
+                $group: {
+                  _id: "$status",
+                  count: { $sum: 1 }
+                }
+              }
+            ],
+            topJobs: [
+              { $match: { status: "active" } },
+              { $sort: { createdAt: -1 } },
+              { $limit: 3 },
+              {
+                $lookup: {
+                  from: "applications",
+                  localField: "_id",
+                  foreignField: "jobId",
+                  as: "_apps"
+                }
+              },
+              {
+                $project: {
+                  title: 1,
+                  status: 1,
+                  createdAt: 1,
+                  views: 1,
+                  applicationCount: { $size: "$_apps" }
+                }
+              }
+            ]
+          }
+        }
+      ]),
+
+      // 3. Application stats — single aggregation with $facet
+      Application.aggregate([
+        { $match: { employerId: empObjId } },
+        {
+          $facet: {
+            stats: [
+              {
+                $group: {
+                  _id: "$status",
+                  count: { $sum: 1 }
+                }
+              }
+            ],
+            total: [{ $count: "n" }]
+          }
+        }
+      ]),
+
+      // 4. Recent 5 applications with applicant name + job title
+      Application.find({ employerId: empObjId })
+        .sort({ appliedDate: -1 })
+        .limit(5)
+        .select("appliedDate status applicantId jobId")
+        .populate("applicantId", "name")
+        .populate("jobId", "title")
+        .lean()
+    ]);
+
+    // --- Reshape job stats ---
+    const rawJobStats = jobAgg[0]?.stats || [];
+    const jobStats = { total: 0, active: 0, draft: 0, paused: 0, closed: 0 };
+    rawJobStats.forEach(({ _id, count }) => {
+      jobStats.total += count;
+      if (_id in jobStats) jobStats[_id] = count;
+    });
+
+    // --- Reshape application stats ---
+    const rawAppStats = appAgg[0]?.stats || [];
+    const appStats = { total: appAgg[0]?.total[0]?.n || 0, pending: 0, shortlisted: 0, interviewScheduled: 0, hired: 0, rejected: 0 };
+    rawAppStats.forEach(({ _id, count }) => {
+      if (_id === "interview_scheduled") appStats.interviewScheduled = count;
+      else if (_id in appStats) appStats[_id] = count;
+    });
+
+    res.json({
+      success: true,
+      data: {
+        employer: {
+          name: employer?.name || employer?.companyName || "User",
+          companyLogo: employer?.companyLogo || null
+        },
+        jobStats,
+        appStats,
+        recentApplications: recentApplications.map(app => ({
+          _id: app._id,
+          appliedDate: app.appliedDate,
+          status: app.status,
+          applicantName: app.applicantId?.name || "Unknown",
+          jobTitle: app.jobId?.title || "Unknown"
+        })),
+        activeJobs: jobAgg[0]?.topJobs || []
+      }
+    });
+
+  } catch (error) {
+    console.error("getEmployerDashboard error:", error);
+    res.status(500).json({ success: false, message: "Failed to load dashboard", error: error.message });
   }
 };
 
