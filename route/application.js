@@ -13,15 +13,19 @@ const {
   getEmployerInterviews,
   createReferralApplication,
   getUserReferralHistory,
-  withdrawApplication
+  withdrawApplication,
+  confirmReferralApplication,
 } = require("../controller/ApplicationController");
 const authMiddleware = require("../middleware/auth");
 
 // Create application (job seeker applies)
 router.post("/applications", authMiddleware, createApplication);
 
-// Create referral application (User A refers User B)
+// Create referral invite (User A refers User B)
 router.post("/applications/referral", authMiddleware, createReferralApplication);
+
+// Confirm referral (friend clicks magic link from email)
+router.get("/applications/referral/confirm", confirmReferralApplication);
 
 // Get job seeker's applications
 router.get("/applications/user", authMiddleware, getUserApplications);

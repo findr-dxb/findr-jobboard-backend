@@ -51,7 +51,7 @@ exports.getEmployerProfileDetails = async (req, res) => {
         companyEmail: publicProfile.companyEmail || "",
         companyLogo: publicProfile.companyLogo || "",
         industry: publicProfile.industry || "",
-        teamSize: publicProfile.teamSize || "1-10",
+        teamSize: publicProfile.teamSize || "0-50",
         foundedYear: publicProfile.foundedYear || 0,
         aboutCompany: publicProfile.aboutCompany || "",
         
@@ -202,7 +202,7 @@ exports.getPublicCompanyProfile = async (req, res) => {
       _id: employer._id,
       companyName: employer.companyName || "",
       industry: employer.industry || "",
-      teamSize: employer.teamSize || "1-10",
+      teamSize: employer.teamSize || "0-50",
       foundedYear: employer.foundedYear || 0,
       about: employer.aboutCompany || "",
       location: {

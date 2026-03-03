@@ -16,6 +16,7 @@ const {
   getReferralJoinerProfile,
   requestProfileAccess,
   confirmProfileAccess,
+  getMyNetwork,
 } = require("../controller/Auth");
 const authMiddleware = require("../middleware/auth");
 
@@ -45,5 +46,8 @@ router.get("/referrals/joiners", authMiddleware, getReferralJoiners);
 router.get("/referrals/joiners/:id", authMiddleware, getReferralJoinerProfile);
 router.post("/profile-access/request", authMiddleware, requestProfileAccess);
 router.get("/profile-access/confirm", confirmProfileAccess);
+
+// My Network: all three sections in one call
+router.get("/referrals/my-network", authMiddleware, getMyNetwork);
 
 module.exports = router;

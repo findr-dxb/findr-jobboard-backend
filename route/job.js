@@ -8,13 +8,14 @@ const {
   closeJob,
   publishJob,
   getEmployerJobs,
-  getJobRecommendations
+  getJobRecommendations,
+  getJobsForPicker,
 } = require("../controller/JobController");
 const authMiddleware = require("../middleware/auth");
 
 // Public routes
 router.get("/jobs", getJobs); // Get all jobs (with filters)
-// router.get("/jobs/:jobId", getJob); // Get a single job
+router.get("/jobs/picker", getJobsForPicker);
 
 // Protected routes (require authentication)
 router.get("/employer/jobs", authMiddleware, getEmployerJobs); // Get employer's own jobs
@@ -28,4 +29,3 @@ router.put("/jobs/:jobId/close", authMiddleware, closeJob); // Close a job
 router.put("/jobs/:jobId/publish", authMiddleware, publishJob); // Publish a job
 
 module.exports = router;
-

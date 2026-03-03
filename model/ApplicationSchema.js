@@ -6,100 +6,109 @@ const applicationSchema = new mongoose.Schema(
     jobId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Job",
-      required: true
+      required: true,
     },
     applicantId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "FindrUser",
-      required: true
+      required: true,
     },
     employerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employer",
-      required: true
+      required: true,
     },
 
     // Application Details
     status: {
       type: String,
-      enum: ["pending", "shortlisted", "interview_scheduled", "hired", "rejected", "withdrawn"],
-      default: "pending"
+      enum: [
+        "pending",
+        "shortlisted",
+        "interview_scheduled",
+        "hired",
+        "rejected",
+        "withdrawn",
+      ],
+      default: "pending",
     },
     appliedDate: {
       type: Date,
-      default: Date.now
+      default: Date.now,
     },
-    
+
     // Documents
     resume: {
       type: String, // File URL/path
-      required: true
+      default: "",
     },
     coverLetter: {
       type: String, // File URL/path
-      default: ""
+      default: "",
     },
-    additionalDocuments: [{
-      fileName: String,
-      fileUrl: String,
-      uploadDate: { type: Date, default: Date.now }
-    }],
+    additionalDocuments: [
+      {
+        fileName: String,
+        fileUrl: String,
+        uploadDate: { type: Date, default: Date.now },
+      },
+    ],
 
     // Application-specific data
     expectedSalary: {
       min: Number,
-      max: Number
+      max: Number,
     },
     availability: {
       type: String,
-      default: ""
+      default: "",
     },
 
     // Referral Information
     referredBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "FindrUser",
-      default: null
+      default: null,
     },
-    
+
     // Employer Actions
     employerNotes: {
       type: String,
-      default: ""
+      default: "",
     },
     rating: {
       type: Number,
       min: 0,
       max: 5,
-      default: 0
+      default: 0,
     },
     interviewDate: {
-      type: Date
+      type: Date,
     },
     interviewMode: {
       type: String,
       enum: ["in-person", "virtual"],
-      default: "in-person"
+      default: "in-person",
     },
     feedback: {
       type: String,
-      default: ""
+      default: "",
     },
 
     // Tracking
     viewedByEmployer: {
       type: Boolean,
-      default: false
+      default: false,
     },
     viewedDate: {
-      type: Date
-    }
+      type: Date,
+    },
   },
-  { 
+  {
     timestamps: true,
     toJSON: { virtuals: true },
-    toObject: { virtuals: true }
-  }
+    toObject: { virtuals: true },
+  },
 );
 
 // Indexes for better performance
@@ -108,19 +117,19 @@ applicationSchema.index({ employerId: 1, status: 1 });
 applicationSchema.index({ appliedDate: -1 });
 
 // Virtual to populate job details
-applicationSchema.virtual('jobDetails', {
-  ref: 'Job',
-  localField: 'jobId',
-  foreignField: '_id',
-  justOne: true
+applicationSchema.virtual("jobDetails", {
+  ref: "Job",
+  localField: "jobId",
+  foreignField: "_id",
+  justOne: true,
 });
 
 // Virtual to populate applicant details
-applicationSchema.virtual('applicantDetails', {
-  ref: 'FindrUser',
-  localField: 'applicantId',
-  foreignField: '_id',
-  justOne: true
+applicationSchema.virtual("applicantDetails", {
+  ref: "FindrUser",
+  localField: "applicantId",
+  foreignField: "_id",
+  justOne: true,
 });
 
 const Application = mongoose.model("Application", applicationSchema);

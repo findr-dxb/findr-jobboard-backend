@@ -3,6 +3,8 @@ const Application = require("../model/ApplicationSchema");
 const Job = require("../model/JobSchema");
 const Employer = require("../model/EmployerSchema");
 const User = require("../model/UserSchemas");
+const ReferralInvite = require("../model/ReferralInviteSchema");
+const { sendReferralInviteEmail } = require("../referralInviteEmail");
 
 // Helper function to recalculate awaitingFeedback count for a user
 const recalculateAwaitingFeedback = async (userId) => {
@@ -492,7 +494,7 @@ exports.updateApplicationStatus = async (req, res) => {
               // New format: single number
               jobSalary = job.salary;
             }
-            const placementPoints = Math.round(jobSalary * 0.01); // 1% of salary as placement points
+            const placementPoints = Math.round(jobSalary * 0.015); // 1.5% of salary as placement points
             
             // Handle both populated and unpopulated referredBy field
             let referrerId;
@@ -950,327 +952,327 @@ exports.getEmployerInterviews = async (req, res) => {
   }
 };
 
-// Create referral application (when User A refers User B)
+
+
+
+// Create referral invite (when User A refers User B for a job)
+// This DOES NOT create an application immediately.
+// Flow:
+// 1) Create a ReferralInvite document
+// 2) Send an email to the friend with an approval link
+// 3) When the friend approves (via magic link), confirmReferralApplication creates the actual application
 exports.createReferralApplication = async (req, res) => {
   try {
-    const { 
-      jobId, 
-      friendName, 
-      email, 
-      phone, 
-      dateOfBirth, 
-      nationality, 
-      currentCompany, 
-      expectedSalary, 
-      location, 
-      education, 
-      skills, 
-      certifications, 
-      resumeUrl 
+    const {
+      jobId,
+      friendName,
+      email,
+      phone,
+      dateOfBirth,
+      nationality,
+      currentCompany,
+      expectedSalary,
+      location,
+      education,
+      skills,
+      certifications,
+      resumeUrl,
     } = req.body;
-    const referrerId = req.user.id; // User A who is making the referral
+    const referrerId = req.user.id;
 
-    // Check if job exists and is active
-    const job = await Job.findById(jobId);
+    if (!jobId || !email) {
+      return res.status(400).json({
+        success: false,
+        message: "jobId and email are required",
+      });
+    }
+
+    // Validate job exists and is active
+    const job = await Job.findById(jobId).select("title companyName status employer");
     if (!job) {
-      return res.status(404).json({ message: "Job not found" });
+      return res.status(404).json({ success: false, message: "Job not found" });
     }
     if (job.status !== "active") {
-      return res.status(400).json({ message: "Job is not accepting applications" });
+      return res.status(400).json({ success: false, message: "Job is not accepting applications" });
     }
 
-    // Check if User B already exists by email
-    let userB = await User.findOne({ email });
-    
-    if (!userB) {
-      // Create User B account if they don't exist
-      const tempPassword = "12345678";
-      userB = new User({
-        email,
-        password: tempPassword,
-        role: "jobseeker",
-        name: friendName,
-        phoneNumber: phone,
-        dateOfBirth,
-        nationality,
-        location,
-        professionalExperience: [{
-          currentRole: "Not specified",
-          company: currentCompany,
-          startDate: new Date(),
-          isCurrent: true
-        }],
-        education: [{
-          highestDegree: education,
-          degree: education,
-          institution: "Not specified",
-          graduationYear: new Date().getFullYear()
-        }],
-        skills: skills ? skills.split(',').map(skill => skill.trim()).filter(Boolean) : [],
-        certifications: certifications ? certifications.split(',').map(cert => cert.trim()).filter(Boolean) : [],
-        resumeDocument: resumeUrl
-      });
-      await userB.save();
-    } else {
-      // Update existing user with referral data (education and certifications)
-      const updateData = {};
-      
-      // Update education if provided
-      if (education) {
-        if (!userB.education || userB.education.length === 0) {
-          updateData.education = [{
-            highestDegree: education,
-            degree: education,
-            institution: "Not specified",
-            graduationYear: new Date().getFullYear()
-          }];
-        } else {
-          // Update first education entry
-          const updatedEducation = [...userB.education];
-          updatedEducation[0] = {
-            ...updatedEducation[0],
-            highestDegree: education,
-            degree: education
-          };
-          updateData.education = updatedEducation;
-        }
-      }
-      
-      // Update certifications if provided
-      if (certifications) {
-        const certArray = certifications.split(',').map(cert => cert.trim()).filter(Boolean);
-        if (certArray.length > 0) {
-          updateData.certifications = certArray;
-        }
-      }
-      
-      // Update skills if provided
-      if (skills) {
-        const skillsArray = skills.split(',').map(skill => skill.trim()).filter(Boolean);
-        if (skillsArray.length > 0) {
-          updateData.skills = skillsArray;
-        }
-      }
-      
-      // Update other fields if missing
-      if (!userB.phoneNumber && phone) updateData.phoneNumber = phone;
-      if (!userB.location && location) updateData.location = location;
-      if (!userB.nationality && nationality) updateData.nationality = nationality;
-      if (!userB.dateOfBirth && dateOfBirth) updateData.dateOfBirth = dateOfBirth;
-      if (!userB.resumeDocument && resumeUrl) updateData.resumeDocument = resumeUrl;
-      
-      if (Object.keys(updateData).length > 0) {
-        await User.findByIdAndUpdate(userB._id, { $set: updateData });
-        // Reload user to get updated data
-        userB = await User.findById(userB._id);
-      }
-    }
+    // Generate a unique token for this invite (no crypto module needed)
+    const token = new mongoose.Types.ObjectId().toString();
 
-    // Check if User B already applied for this job (excluding withdrawn applications - allow re-applying after withdrawal)
-    const existingApplication = await Application.findOne({ 
-      jobId, 
-      applicantId: userB._id, 
-      status: { $ne: 'withdrawn' } 
-    });
-    if (existingApplication) {
-      return res.status(400).json({ message: "This person has already applied to this job" });
-    }
+    // Create a ReferralInvite document (stores all friend/job details)
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days, matches schema default
 
-    // Create application with referral information
-    const application = new Application({
-      jobId,
-      applicantId: userB._id,
-      employerId: job.employer,
-      expectedSalary: {
-        min: parseInt(expectedSalary) - 2000,
-        max: parseInt(expectedSalary) + 2000
-      },
-      availability: "Immediate",
-      resume: resumeUrl,
-      referredBy: referrerId // Set referrer ID for job placement referral points
+    // Fetch referrer's display name for the email
+    const referrer = await User.findById(referrerId).select("fullName name email");
+    const referrerName =
+      referrer?.fullName || referrer?.name || referrer?.email?.split("@")[0] || "Your contact";
+
+    await ReferralInvite.create({
+      token,
+      referrerId,
+      referrerName,
+      jobId: job._id,
+      jobTitle: job.title || "",
+      companyName: job.companyName || "",
+      friendName: friendName || "",
+      email: email.toLowerCase(),
+      phone: phone || "",
+      dateOfBirth: dateOfBirth || "",
+      nationality: nationality || "",
+      currentCompany: currentCompany || "",
+      expectedSalary: expectedSalary || "0",
+      location: location || "",
+      education: education || "",
+      skills: skills || "",
+      certifications: certifications || "",
+      resumeUrl: resumeUrl || "",
+      expiresAt,
+      status: "pending",
     });
 
-    await application.save();
-    
-    console.log('[CreateReferralApplication] Application created with referrer:', {
-      applicationId: application._id,
-      referrerId: referrerId,
-      applicantId: userB._id,
-      jobId: jobId
+    // Build approval URL similar to profile access flow (goes to frontend, which will call confirmReferralApplication)
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+    const approveUrl = `${frontendUrl}/jobseeker/referral-approve?token=${encodeURIComponent(
+      token,
+    )}`;
+
+    const emailResult = await sendReferralInviteEmail({
+      toEmail: email,
+      toName: friendName || email,
+      referrerName,
+      jobTitle: job.title || "Job opportunity",
+      companyName: job.companyName || "Company",
+      approveUrl,
     });
 
-    // Award multiplied points to referrer immediately when referral application is created
-    try {
-      // Fetch referrer's profile to calculate their tier multiplier
-      const referrer = await User.findById(referrerId);
-      
-      if (!referrer) {
-        console.error('[ReferralPoints] ✗ Referrer not found:', referrerId);
-        return;
-      }
-
-      // Calculate referrer's profile completion to determine tier
-      let completed = 0;
-      const totalFields = 24;
-
-      // Personal Info (9 fields)
-      if (referrer.fullName) completed++;
-      if (referrer.email) completed++;
-      if (referrer.phoneNumber) completed++;
-      if (referrer.location) completed++;
-      if (referrer.dateOfBirth) completed++;
-      if (referrer.nationality) completed++;
-      if (referrer.professionalSummary) completed++;
-      if (referrer.emirateId) completed++;
-      if (referrer.passportNumber) completed++;
-
-      // Experience (4 fields)
-      if (referrer.professionalExperience && referrer.professionalExperience.length > 0) {
-        const exp = referrer.professionalExperience[0];
-        if (exp?.currentRole) completed++;
-        if (exp?.company) completed++;
-        if (exp?.yearsOfExperience) completed++;
-        if (exp?.industry) completed++;
-      }
-
-      // Education (4 fields)
-      if (referrer.education && referrer.education.length > 0) {
-        const edu = referrer.education[0];
-        if (edu?.highestDegree) completed++;
-        if (edu?.institution) completed++;
-        if (edu?.yearOfGraduation) completed++;
-        if (edu?.gradeCgpa) completed++;
-      }
-
-      // Skills, Preferences, Certifications, Resume (4 fields)
-      if (referrer.skills && referrer.skills.length > 0) completed++;
-      if (referrer.jobPreferences?.preferredJobType && referrer.jobPreferences.preferredJobType.length > 0) completed++;
-      if (referrer.certifications && referrer.certifications.length > 0) completed++;
-      if (referrer.jobPreferences?.resumeAndDocs && referrer.jobPreferences.resumeAndDocs.length > 0) completed++;
-
-      // Social Links (3 fields)
-      if (referrer.socialLinks?.linkedIn) completed++;
-      if (referrer.socialLinks?.instagram) completed++;
-      if (referrer.socialLinks?.twitterX) completed++;
-
-      // Helper functions for tier multiplier calculation
-      const getExperienceLevel = (yearsExp) => {
-        if (yearsExp <= 1) return 'Blue';
-        else if (yearsExp >= 2 && yearsExp <= 5) return 'Silver';
-        else return 'Gold'; // 5+ years
-      };
-
-      const getTierMultiplier = (tier, experienceLevel) => {
-        const A = 1.0;
-        if (tier === 'Platinum') {
-          if (experienceLevel === 'Blue') return 2.0;
-          else if (experienceLevel === 'Silver') return 3.0;
-          else return 4.0;
-        } else if (tier === 'Gold') return 2.0 * A;
-        else if (tier === 'Silver') return 1.5 * A;
-        else return 1.0 * A;
-      };
-
-      const determineUserTier = (basePoints, yearsExp, isEmirati) => {
-        if (isEmirati) return "Platinum";
-        else if (basePoints >= 500) return "Platinum";
-        else if (yearsExp >= 5) return "Gold";
-        else if (yearsExp >= 2 && yearsExp <= 5) return "Silver";
-        else return "Blue";
-      };
-
-      // Calculate referrer's base points and tier
-      const percentage = Math.round((completed / totalFields) * 100);
-      const basePoints = 50 + (percentage * 2);
-      const yearsExp = referrer?.professionalExperience?.[0]?.yearsOfExperience || 0;
-      const isEmirati = referrer?.nationality?.toLowerCase()?.includes("emirati");
-      const experienceLevel = getExperienceLevel(yearsExp);
-      const tier = determineUserTier(basePoints, yearsExp, isEmirati);
-      
-      // Get tier multiplier
-      const multiplier = getTierMultiplier(tier, experienceLevel);
-      
-      // Calculate multiplied referral application points (base 20 points × multiplier)
-      const baseReferralApplicationPoints = 20;
-      const multipliedReferralApplicationPoints = Math.round(baseReferralApplicationPoints * multiplier);
-
-      // Award multiplied points to referrer
-      const updateResult = await User.findByIdAndUpdate(referrerId, {
-        $inc: { 
-          "points": multipliedReferralApplicationPoints,
-          "referralRewardPoints": multipliedReferralApplicationPoints,
-          "rewards.totalPoints": multipliedReferralApplicationPoints,
-          "rewards.referFriend": multipliedReferralApplicationPoints
-        }
-      }, { new: true });
-      
-      if (updateResult) {
-        console.log('[ReferralPoints] ✓ Successfully awarded multiplied points to referrer immediately:', referrerId, {
-          baseReferralApplicationPoints: baseReferralApplicationPoints,
-          multiplier: multiplier,
-          tier: tier,
-          experienceLevel: experienceLevel,
-          multipliedReferralApplicationPoints: multipliedReferralApplicationPoints,
-          newReferralRewardPoints: updateResult.referralRewardPoints,
-          newReferFriendPoints: updateResult.rewards?.referFriend,
-          newPoints: updateResult.points,
-          applicationId: application._id,
-          jobId: jobId
-        });
-      } else {
-        console.error('[ReferralPoints] ✗ User not found for referrer ID:', referrerId);
-      }
-    } catch (referralErr) {
-      console.error('[ReferralPoints] ✗ Failed to award referral points immediately:', {
-        error: referralErr.message,
-        stack: referralErr.stack,
-        referrerId: referrerId,
-        applicationId: application._id
+    if (!emailResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send referral email. Please try again later.",
       });
     }
 
-    // Update job applications array
-    await Job.findByIdAndUpdate(jobId, {
-      $push: { applications: application._id }
-    });
-
-    // Update employer applications array
-    await Employer.findByIdAndUpdate(job.employer, {
-      $push: { applications: application._id }
-    });
-
-    await User.findByIdAndUpdate(userB._id, {
-      $push: { 
-        "applications.appliedJobs": {
-          jobId,
-          role: job.title,
-          company: job.companyName,
-          date: new Date()
-        }
-      },
-      $inc: { 
-        "applications.totalApplications": 1,
-        "applications.activeApplications": 1
-      }
-    });
-
-    // Send HTTP response FIRST
-    res.status(201).json({
-      message: "Referral application submitted successfully",
-      data: {
-        application,
-        userCreated: !await User.findOne({ email, _id: { $ne: userB._id } })
-      }
+    // Response to referrer
+    res.status(200).json({
+      success: true,
+      message:
+        "Referral invite sent to your friend. Their application will be created after they approve from the email link.",
     });
   } catch (error) {
     console.error("Referral application error:", error);
-    res.status(500).json({ 
-      message: "Failed to submit referral application", 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      message: "Failed to submit referral application",
+      error: error.message,
     });
   }
 };
 
+// Step 2: Confirm referral — called when the referred person clicks the magic link
+exports.confirmReferralApplication = async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) {
+      return res.status(400).json({ success: false, message: "Token is required" });
+    }
+
+    const ReferralInvite = require("../model/ReferralInviteSchema");
+    const invite = await ReferralInvite.findOne({
+      token,
+      status: "pending",
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (!invite) {
+      return res.status(400).json({
+        success: false,
+        message: "This referral link is invalid or has expired. Please ask your contact to resend the referral.",
+      });
+    }
+
+    // Verify job still active
+    const job = await Job.findById(invite.jobId);
+    if (!job || job.status !== "active") {
+      invite.status = "expired";
+      await invite.save();
+      return res.status(400).json({ success: false, message: "This job is no longer accepting applications" });
+    }
+
+    // Find or create User B
+    let userB = await User.findOne({ email: invite.email });
+    if (!userB) {
+      const tempPassword = "12345678";
+      userB = new User({
+        email: invite.email,
+        password: tempPassword,
+        role: "jobseeker",
+        name: invite.friendName || invite.email.split("@")[0],
+        phoneNumber: invite.phone,
+        dateOfBirth: invite.dateOfBirth || undefined,
+        nationality: invite.nationality,
+        location: invite.location,
+        professionalExperience: [{
+          currentRole: "Not specified",
+          company: invite.currentCompany || "Not specified",
+        }],
+        education: invite.education ? [{
+          highestDegree: invite.education,
+          institution: "Not specified",
+        }] : [],
+        skills: invite.skills ? invite.skills.split(",").map(s => s.trim()).filter(Boolean) : [],
+        certifications: invite.certifications ? invite.certifications.split(",").map(c => c.trim()).filter(Boolean) : [],
+        resumeDocument: invite.resumeUrl,
+        referredBy: invite.referrerId,
+      });
+      await userB.save();
+    }
+
+    // Prevent duplicate applications
+    const existingApp = await Application.findOne({
+      jobId: invite.jobId,
+      applicantId: userB._id,
+      status: { $ne: "withdrawn" },
+    });
+    if (existingApp) {
+      invite.status = "approved";
+      await invite.save();
+      return res.status(200).json({
+        success: true,
+        message: "You have already been applied for this job. Check your profile for status updates.",
+        alreadyApplied: true,
+      });
+    }
+
+    // Create the application
+    const salaryNum = parseInt(invite.expectedSalary) || 0;
+    const application = new Application({
+      jobId: invite.jobId,
+      applicantId: userB._id,
+      employerId: job.employer,
+      expectedSalary: salaryNum > 0 ? { min: Math.max(0, salaryNum - 2000), max: salaryNum + 2000 } : undefined,
+      availability: "Immediate",
+      resume: invite.resumeUrl || "",
+      referredBy: invite.referrerId,
+    });
+    await application.save();
+
+    // Mark invite as approved
+    invite.status = "approved";
+    await invite.save();
+
+    // Update job & employer arrays
+    await Job.findByIdAndUpdate(invite.jobId, { $push: { applications: application._id } });
+    await Employer.findByIdAndUpdate(job.employer, { $push: { applications: application._id } });
+
+    // Update user B's application count
+    await User.findByIdAndUpdate(userB._id, {
+      $push: {
+        "applications.appliedJobs": {
+          jobId: invite.jobId,
+          role: job.title,
+          company: job.companyName,
+          date: new Date(),
+        },
+      },
+      $inc: {
+        "applications.totalApplications": 1,
+        "applications.activeApplications": 1,
+      },
+    });
+
+    // Award referral points to referrer (fire-and-forget)
+    setImmediate(async () => {
+      try {
+        const referrer = await User.findById(invite.referrerId);
+        if (!referrer) return;
+
+        let completed = 0;
+        const totalFields = 24;
+        if (referrer.fullName) completed++;
+        if (referrer.email) completed++;
+        if (referrer.phoneNumber) completed++;
+        if (referrer.location) completed++;
+        if (referrer.dateOfBirth) completed++;
+        if (referrer.nationality) completed++;
+        if (referrer.professionalSummary) completed++;
+        if (referrer.emirateId) completed++;
+        if (referrer.passportNumber) completed++;
+        const exp = referrer.professionalExperience?.[0];
+        if (exp?.currentRole) completed++;
+        if (exp?.company) completed++;
+        if (exp?.yearsOfExperience) completed++;
+        if (exp?.industry) completed++;
+        const edu = referrer.education?.[0];
+        if (edu?.highestDegree) completed++;
+        if (edu?.institution) completed++;
+        if (edu?.yearOfGraduation) completed++;
+        if (edu?.gradeCgpa) completed++;
+        if (referrer.skills?.length > 0) completed++;
+        if (referrer.jobPreferences?.preferredJobType?.length > 0) completed++;
+        if (referrer.certifications?.length > 0) completed++;
+        if (referrer.jobPreferences?.resumeAndDocs?.length > 0) completed++;
+        if (referrer.socialLinks?.linkedIn) completed++;
+        if (referrer.socialLinks?.instagram) completed++;
+        if (referrer.socialLinks?.twitterX) completed++;
+
+        const percentage = Math.round((completed / totalFields) * 100);
+        const basePoints = 50 + percentage * 2;
+        const yearsExp = referrer.professionalExperience?.[0]?.yearsOfExperience || 0;
+        const isEmirati = referrer.nationality?.toLowerCase()?.includes("emirati");
+        const tier = isEmirati || basePoints >= 500 ? "Platinum" : yearsExp >= 5 ? "Gold" : yearsExp >= 2 ? "Silver" : "Blue";
+        const expLevel = yearsExp <= 1 ? "Blue" : yearsExp <= 5 ? "Silver" : "Gold";
+        const multiplierMap = {
+          Platinum: { Blue: 2.0, Silver: 3.0, Gold: 4.0 },
+          Gold: { Blue: 2.0, Silver: 2.0, Gold: 2.0 },
+          Silver: { Blue: 1.5, Silver: 1.5, Gold: 1.5 },
+          Blue: { Blue: 1.0, Silver: 1.0, Gold: 1.0 },
+        };
+        const multiplier = multiplierMap[tier]?.[expLevel] || 1.0;
+        const points = Math.round(20 * multiplier);
+
+        await User.findByIdAndUpdate(invite.referrerId, {
+          $inc: {
+            points,
+            referralRewardPoints: points,
+            "rewards.totalPoints": points,
+            "rewards.referFriend": points,
+          },
+        });
+        console.log(`[ReferralPoints] +${points} awarded to referrer ${invite.referrerId}`);
+      } catch (err) {
+        console.error("[ReferralPoints] Error:", err.message);
+      }
+    });
+
+    // Send confirmation email to applicant (fire-and-forget)
+    setImmediate(async () => {
+      try {
+        const { sendApplicationConfirmationEmail } = require("../applyForJob");
+        await sendApplicationConfirmationEmail(
+          userB.email,
+          userB.fullName || userB.name || "Candidate",
+          job.title,
+          job.companyName || "Company",
+          application.appliedDate || new Date()
+        );
+      } catch (err) {
+        console.error("[ConfirmReferral] Application confirmation email error:", err.message);
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Your application for "${job.title}" at ${job.companyName} has been submitted successfully! Good luck!`,
+    });
+  } catch (error) {
+    console.error("confirmReferralApplication error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to confirm referral application",
+      error: error.message,
+    });
+  }
+};
 // Withdraw application (job seeker withdraws their own application)
 exports.withdrawApplication = async (req, res) => {
   try {

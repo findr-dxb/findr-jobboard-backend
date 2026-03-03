@@ -168,8 +168,7 @@ exports.signup = async (req, res) => {
         // Get tier multiplier
         const multiplier = getTierMultiplier(tier, experienceLevel);
         
-        // Calculate multiplied referral points (base 50 points × multiplier)
-        const baseReferralPoints = 50;
+        const baseReferralPoints = 100;
         const multipliedReferralPoints = Math.round(baseReferralPoints * multiplier);
 
         // Award multiplied points to referrer
@@ -1628,7 +1627,6 @@ exports.requestProfileAccess = async (req, res) => {
   }
 };
 
-// Confirm profile access (magic link) - no auth required
 exports.confirmProfileAccess = async (req, res) => {
   try {
     const token = req.query?.token || req.body?.token;
@@ -1666,6 +1664,99 @@ exports.confirmProfileAccess = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to confirm access",
+      error: error.message,
+    });
+  }
+};
+exports.getMyNetwork = async (req, res) => {
+  try {
+    const userId   = req.user?.id;
+    const userRole = req.user?.role;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized." });
+    }
+    if (userRole !== "jobseeker") {
+      return res.status(403).json({ success: false, message: "Only jobseekers can view their network." });
+    }
+
+    const Application = require("../model/ApplicationSchema");
+
+    const [jobseekerInvited, employerInvited] = await Promise.all([
+      User.find({ referredBy: userId }).select("fullName name email role").lean(),
+      Employer.find({ referredBy: userId }).select("companyName name email role").lean(),
+    ]);
+
+    const invited = [
+      ...jobseekerInvited.map((u) => ({
+        id:     u._id.toString(),
+        name:   u.fullName || u.name || (u.email ? u.email.split("@")[0] : "User"),
+        role:   u.role || "jobseeker",
+        type:   "invited",
+        status: "Joined",
+      })),
+      ...employerInvited.map((e) => ({
+        id:     e._id.toString(),
+        name:   e.companyName || e.name || (e.email ? e.email.split("@")[0] : "Employer"),
+        role:   "employer",
+        type:   "invited",
+        status: "Joined",
+      })),
+    ];
+
+    const referredApps = await Application.find({ referredBy: userId })
+      .sort({ appliedDate: -1 })
+      .populate("applicantId", "fullName name email role")
+      .lean();
+
+    const seenApplicants = new Map();
+    for (const app of referredApps) {
+      const aid = app.applicantId?._id?.toString();
+      if (!aid || seenApplicants.has(aid)) continue;
+      const u = app.applicantId;
+      seenApplicants.set(aid, {
+        id:     aid,
+        name:   u.fullName || u.name || (u.email ? u.email.split("@")[0] : "User"),
+        role:   u.role || "jobseeker",
+        type:   "referred",
+        status: app.status,
+      });
+    }
+    const referred = Array.from(seenApplicants.values());
+
+    const grantedRequests = await ProfileAccessRequest.find({
+      requesterId: userId,
+      status: "granted",
+    }).select("targetUserId targetType").lean();
+
+    const searchedPromises = grantedRequests.map(async (gr) => {
+      let user = await User.findById(gr.targetUserId).select("fullName name email role").lean();
+      let role = "jobseeker";
+      if (!user) {
+        user = await Employer.findById(gr.targetUserId).select("companyName name email role").lean();
+        role = "employer";
+      }
+      if (!user) return null;
+      return {
+        id:     gr.targetUserId.toString(),
+        name:   user.fullName || user.companyName || user.name || (user.email ? user.email.split("@")[0] : "User"),
+        role,
+        type:   "searched",
+        status: "Profile Access Granted",
+      };
+    });
+
+    const searched = (await Promise.all(searchedPromises)).filter(Boolean);
+
+    return res.status(200).json({
+      success: true,
+      data: { invited, referred, searched },
+    });
+  } catch (error) {
+    console.error("getMyNetwork error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch network",
       error: error.message,
     });
   }
