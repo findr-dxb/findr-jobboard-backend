@@ -996,6 +996,22 @@ exports.createReferralApplication = async (req, res) => {
       return res.status(400).json({ success: false, message: "Job is not accepting applications" });
     }
 
+    // Prevent duplicate referrals by the same referrer for the same friend and job
+    const normalizedEmail = email.toLowerCase();
+    const existingInvite = await ReferralInvite.findOne({
+      jobId: job._id,
+      email: normalizedEmail,
+      referrerId,
+      status: { $in: ["pending", "approved"] },
+    });
+
+    if (existingInvite) {
+      return res.status(400).json({
+        success: false,
+        message: "You have already referred this candidate for this job.",
+      });
+    }
+
     // Generate a unique token for this invite (no crypto module needed)
     const token = new mongoose.Types.ObjectId().toString();
 
@@ -1015,7 +1031,7 @@ exports.createReferralApplication = async (req, res) => {
       jobTitle: job.title || "",
       companyName: job.companyName || "",
       friendName: friendName || "",
-      email: email.toLowerCase(),
+      email: normalizedEmail,
       phone: phone || "",
       dateOfBirth: dateOfBirth || "",
       nationality: nationality || "",

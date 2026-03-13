@@ -12,10 +12,11 @@ const {
   getJobsForPicker,
 } = require("../controller/JobController");
 const authMiddleware = require("../middleware/auth");
+const optionalAuthMiddleware = require("../middleware/optionalAuth");
 
 // Public routes
 router.get("/jobs", getJobs); // Get all jobs (with filters)
-router.get("/jobs/picker", getJobsForPicker);
+router.get("/jobs/picker", optionalAuthMiddleware, getJobsForPicker);
 
 // Protected routes (require authentication)
 router.get("/employer/jobs", authMiddleware, getEmployerJobs); // Get employer's own jobs

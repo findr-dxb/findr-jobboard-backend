@@ -2,6 +2,7 @@ const Job = require("../model/JobSchema");
 const User = require("../model/UserSchemas");
 const Application = require("../model/ApplicationSchema");
 const Employer = require("../model/EmployerSchema");
+const ReferralInvite = require("../model/ReferralInviteSchema");
 
 // Create a new job
 exports.createJob = async (req, res) => {
@@ -166,7 +167,7 @@ exports.updateJob = async (req, res) => {
 };
 exports.getJobsForPicker = async (req, res) => {
   try {
-    const { search = "", page = 1, limit = 8 } = req.query;
+    const { search = "", page = 1, limit = 8, candidateEmail } = req.query;
 
     const pageNum = Math.max(1, parseInt(page, 10));
     const limitNum = Math.max(1, Math.min(50, parseInt(limit, 10)));
@@ -183,13 +184,31 @@ exports.getJobsForPicker = async (req, res) => {
 
     const [jobs, total] = await Promise.all([
       Job.find(query)
-        .select("title companyName location jobType salary")
+        .select("title companyName location jobType salary _id")
         .sort({ createdAt: -1 })
         .skip((pageNum - 1) * limitNum)
         .limit(limitNum)
         .lean(),
       Job.countDocuments(query),
     ]);
+
+    // When candidateEmail + authenticated user: mark jobs already referred by this user for this candidate
+    if (candidateEmail && candidateEmail.trim() && req.user?.id) {
+      const normalizedEmail = candidateEmail.trim().toLowerCase();
+      const jobIds = jobs.map((j) => j._id);
+      const referredJobIds = await ReferralInvite.find({
+        referrerId: req.user.id,
+        email: normalizedEmail,
+        jobId: { $in: jobIds },
+        status: { $in: ["pending", "approved"] },
+      }).distinct("jobId");
+      const referredSet = new Set(referredJobIds.map((id) => id.toString()));
+      jobs.forEach((j) => {
+        j.alreadyReferred = referredSet.has(j._id.toString());
+      });
+    } else {
+      jobs.forEach((j) => { j.alreadyReferred = false; });
+    }
 
     res.status(200).json({
       success: true,

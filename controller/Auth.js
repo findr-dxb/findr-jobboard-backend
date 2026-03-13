@@ -1723,6 +1723,9 @@ exports.getMyNetwork = async (req, res) => {
       });
     }
     const referred = Array.from(seenApplicants.values());
+    const referredIds = new Set(referred.map((r) => r.id));
+    const invitedFiltered = invited.filter((inv) => !referredIds.has(inv.id));
+    const invitedIds = new Set(invitedFiltered.map((inv) => inv.id));
 
     const grantedRequests = await ProfileAccessRequest.find({
       requesterId: userId,
@@ -1746,11 +1749,15 @@ exports.getMyNetwork = async (req, res) => {
       };
     });
 
-    const searched = (await Promise.all(searchedPromises)).filter(Boolean);
+    const searchedRaw = (await Promise.all(searchedPromises)).filter(Boolean);
+    // Exclude from searched anyone in referred or invited — update to "referred"/"invited" instead of duplicate
+    const searchedFiltered = searchedRaw.filter(
+      (s) => !referredIds.has(s.id) && !invitedIds.has(s.id)
+    );
 
     return res.status(200).json({
       success: true,
-      data: { invited, referred, searched },
+      data: { invited: invitedFiltered, referred, searched: searchedFiltered },
     });
   } catch (error) {
     console.error("getMyNetwork error:", error);
