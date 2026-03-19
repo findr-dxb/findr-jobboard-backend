@@ -1672,6 +1672,10 @@ exports.getMyNetwork = async (req, res) => {
   try {
     const userId   = req.user?.id;
     const userRole = req.user?.role;
+    const page     = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit    = Math.min(50, Math.max(10, parseInt(req.query.limit, 10) || 20));
+    const search   = (req.query.search || "").trim().toLowerCase();
+    const roleFilter = req.query.role; // optional: "jobseeker" | "employer"
 
     if (!userId) {
       return res.status(401).json({ success: false, message: "Unauthorized." });
@@ -1750,14 +1754,41 @@ exports.getMyNetwork = async (req, res) => {
     });
 
     const searchedRaw = (await Promise.all(searchedPromises)).filter(Boolean);
-    // Exclude from searched anyone in referred or invited — update to "referred"/"invited" instead of duplicate
     const searchedFiltered = searchedRaw.filter(
       (s) => !referredIds.has(s.id) && !invitedIds.has(s.id)
     );
 
+    // Merge with priority: referred > invited > searched
+    const merged = [...referred, ...invitedFiltered, ...searchedFiltered];
+
+    // Apply role filter
+    let filtered = merged;
+    if (roleFilter === "jobseeker") {
+      filtered = merged.filter((p) => (p.role || "").toLowerCase() === "jobseeker");
+    } else if (roleFilter === "employer") {
+      filtered = merged.filter((p) => (p.role || "").toLowerCase() === "employer");
+    }
+
+    // Apply search filter (name, type, status)
+    if (search) {
+      filtered = filtered.filter((p) => {
+        const name   = (p.name || "").toLowerCase();
+        const type   = (p.type || "").toLowerCase();
+        const status = (p.status || "").toLowerCase();
+        const role   = (p.role || "").toLowerCase();
+        return name.includes(search) || type.includes(search) || status.includes(search) || role.includes(search);
+      });
+    }
+
+    const total = filtered.length;
+    const pages = Math.ceil(total / limit) || 1;
+    const start = (page - 1) * limit;
+    const paginated = filtered.slice(start, start + limit);
+
     return res.status(200).json({
       success: true,
-      data: { invited: invitedFiltered, referred, searched: searchedFiltered },
+      data: paginated,
+      pagination: { total, pages, page, limit },
     });
   } catch (error) {
     console.error("getMyNetwork error:", error);
