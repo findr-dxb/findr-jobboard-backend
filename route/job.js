@@ -22,8 +22,7 @@ router.get("/jobs/picker", optionalAuthMiddleware, getJobsForPicker);
 router.get("/employer/jobs", authMiddleware, getEmployerJobs); // Get employer's own jobs
 router.get("/jobs/recommendations", authMiddleware, getJobRecommendations); // Get job recommendations for user
 
-// Public route with dynamic parameter (must be after specific routes)
-router.get("/jobs/:jobId", getJob); // Get a single job
+router.get("/jobs/:jobId", optionalAuthMiddleware, getJob); // Get 
 router.post("/create/jobs", authMiddleware, createJob); // Create a new job
 router.put("/jobs/:jobId", authMiddleware, updateJob); // Update a job
 router.put("/jobs/:jobId/close", authMiddleware, closeJob); // Close a job

@@ -268,6 +268,16 @@ app.post('/create-checkout-session', async (req, res) => {
   }
 });
 
+const { expireJobsPastApplicationDeadline } = require("./utils/expireJobsByDeadline");
+
 app.listen(PORT, () => {
   console.log(`App is Listening at ${PORT}`);
+  expireJobsPastApplicationDeadline().catch((err) =>
+    console.error("expireJobsPastApplicationDeadline (startup):", err.message)
+  );
+  setInterval(() => {
+    expireJobsPastApplicationDeadline().catch((err) =>
+      console.error("expireJobsPastApplicationDeadline (interval):", err.message)
+    );
+  }, 60 * 60 * 1000);
 });

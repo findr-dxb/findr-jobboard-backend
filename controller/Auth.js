@@ -1668,6 +1668,54 @@ exports.confirmProfileAccess = async (req, res) => {
     });
   }
 };
+
+/** Per-member career fields for refer-friend / network UI (not the job being referred). */
+function jobseekerNetworkProfileFields(u) {
+  if (!u) {
+    return {
+      currentJobTitle: "",
+      currentCompany: "",
+      location: "",
+      preferredJobType: "",
+      salaryExpectation: "",
+    };
+  }
+  const pe = Array.isArray(u.professionalExperience) && u.professionalExperience.length
+    ? u.professionalExperience[0]
+    : null;
+  const jp = u.jobPreferences || {};
+  return {
+    currentJobTitle: pe && pe.currentRole ? String(pe.currentRole).trim() : "",
+    currentCompany: pe && pe.company ? String(pe.company).trim() : "",
+    location: String(u.location || jp.preferredLocation || "").trim(),
+    preferredJobType:
+      Array.isArray(jp.preferredJobType) && jp.preferredJobType.length
+        ? String(jp.preferredJobType[0]).trim()
+        : "",
+    salaryExpectation: jp.salaryExpectation ? String(jp.salaryExpectation).trim() : "",
+  };
+}
+
+function employerNetworkProfileFields(e) {
+  if (!e) {
+    return {
+      currentJobTitle: "",
+      currentCompany: "",
+      location: "",
+      preferredJobType: "",
+      salaryExpectation: "",
+    };
+  }
+  const loc = [e.companyLocation, e.city, e.country].filter(Boolean).join(", ").trim();
+  return {
+    currentJobTitle: "",
+    currentCompany: (e.companyName || "").trim(),
+    location: loc,
+    preferredJobType: "",
+    salaryExpectation: "",
+  };
+}
+
 exports.getMyNetwork = async (req, res) => {
   try {
     const userId   = req.user?.id;
@@ -1686,9 +1734,14 @@ exports.getMyNetwork = async (req, res) => {
 
     const Application = require("../model/ApplicationSchema");
 
+    const jobseekerSelect =
+      "fullName name email role location professionalExperience jobPreferences";
+
     const [jobseekerInvited, employerInvited] = await Promise.all([
-      User.find({ referredBy: userId }).select("fullName name email role").lean(),
-      Employer.find({ referredBy: userId }).select("companyName name email role").lean(),
+      User.find({ referredBy: userId }).select(jobseekerSelect).lean(),
+      Employer.find({ referredBy: userId })
+        .select("companyName name email role companyLocation city country")
+        .lean(),
     ]);
 
     const invited = [
@@ -1698,6 +1751,7 @@ exports.getMyNetwork = async (req, res) => {
         role:   u.role || "jobseeker",
         type:   "invited",
         status: "Joined",
+        ...jobseekerNetworkProfileFields(u),
       })),
       ...employerInvited.map((e) => ({
         id:     e._id.toString(),
@@ -1705,12 +1759,13 @@ exports.getMyNetwork = async (req, res) => {
         role:   "employer",
         type:   "invited",
         status: "Joined",
+        ...employerNetworkProfileFields(e),
       })),
     ];
 
     const referredApps = await Application.find({ referredBy: userId })
       .sort({ appliedDate: -1 })
-      .populate("applicantId", "fullName name email role")
+      .populate("applicantId", jobseekerSelect)
       .lean();
 
     const seenApplicants = new Map();
@@ -1724,6 +1779,7 @@ exports.getMyNetwork = async (req, res) => {
         role:   u.role || "jobseeker",
         type:   "referred",
         status: app.status,
+        ...jobseekerNetworkProfileFields(u),
       });
     }
     const referred = Array.from(seenApplicants.values());
@@ -1737,19 +1793,26 @@ exports.getMyNetwork = async (req, res) => {
     }).select("targetUserId targetType").lean();
 
     const searchedPromises = grantedRequests.map(async (gr) => {
-      let user = await User.findById(gr.targetUserId).select("fullName name email role").lean();
+      let user = await User.findById(gr.targetUserId).select(jobseekerSelect).lean();
       let role = "jobseeker";
       if (!user) {
-        user = await Employer.findById(gr.targetUserId).select("companyName name email role").lean();
+        user = await Employer.findById(gr.targetUserId)
+          .select("companyName name email role companyLocation city country")
+          .lean();
         role = "employer";
       }
       if (!user) return null;
+      const profile =
+        role === "jobseeker"
+          ? jobseekerNetworkProfileFields(user)
+          : employerNetworkProfileFields(user);
       return {
         id:     gr.targetUserId.toString(),
         name:   user.fullName || user.companyName || user.name || (user.email ? user.email.split("@")[0] : "User"),
         role,
         type:   "searched",
         status: "Profile Access Granted",
+        ...profile,
       };
     });
 
@@ -1769,14 +1832,29 @@ exports.getMyNetwork = async (req, res) => {
       filtered = merged.filter((p) => (p.role || "").toLowerCase() === "employer");
     }
 
-    // Apply search filter (name, type, status)
+    // Apply search filter (name, type, status, member profile fields)
     if (search) {
       filtered = filtered.filter((p) => {
         const name   = (p.name || "").toLowerCase();
         const type   = (p.type || "").toLowerCase();
         const status = (p.status || "").toLowerCase();
         const role   = (p.role || "").toLowerCase();
-        return name.includes(search) || type.includes(search) || status.includes(search) || role.includes(search);
+        const jt     = (p.currentJobTitle || "").toLowerCase();
+        const cc     = (p.currentCompany || "").toLowerCase();
+        const loc    = (p.location || "").toLowerCase();
+        const pjt    = (p.preferredJobType || "").toLowerCase();
+        const sal    = (p.salaryExpectation || "").toLowerCase();
+        return (
+          name.includes(search) ||
+          type.includes(search) ||
+          status.includes(search) ||
+          role.includes(search) ||
+          jt.includes(search) ||
+          cc.includes(search) ||
+          loc.includes(search) ||
+          pjt.includes(search) ||
+          sal.includes(search)
+        );
       });
     }
 

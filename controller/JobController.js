@@ -1,5 +1,9 @@
 const Job = require("../model/JobSchema");
 const User = require("../model/UserSchemas");
+const {
+  expireJobsPastApplicationDeadline,
+  utcStartOfDay,
+} = require("../utils/expireJobsByDeadline");
 const Application = require("../model/ApplicationSchema");
 const Employer = require("../model/EmployerSchema");
 const ReferralInvite = require("../model/ReferralInviteSchema");
@@ -147,6 +151,18 @@ exports.updateJob = async (req, res) => {
       }
     }
 
+    // If deadline is extended to today or later (UTC calendar day), reactivate expired jobs
+    if (updateData.applicationDeadline !== undefined) {
+      const parsed = new Date(updateData.applicationDeadline);
+      if (!Number.isNaN(parsed.getTime())) {
+        const deadlineDay = utcStartOfDay(parsed);
+        const todayStart = utcStartOfDay(new Date());
+        if (deadlineDay >= todayStart && job.status === "expired") {
+          updateData.status = "active";
+        }
+      }
+    }
+
     const updatedJob = await Job.findByIdAndUpdate(
       jobId,
       { $set: updateData },
@@ -167,6 +183,8 @@ exports.updateJob = async (req, res) => {
 };
 exports.getJobsForPicker = async (req, res) => {
   try {
+    await expireJobsPastApplicationDeadline();
+
     const { search = "", page = 1, limit = 8, candidateEmail } = req.query;
 
     const pageNum = Math.max(1, parseInt(page, 10));
@@ -235,6 +253,8 @@ exports.getJobsForPicker = async (req, res) => {
 // Get all jobs (with filters)
 exports.getJobs = async (req, res) => {
   try {
+    await expireJobsPastApplicationDeadline();
+
     const {
       location,
       jobType,
@@ -298,6 +318,8 @@ exports.getJobs = async (req, res) => {
 // Get a single job
 exports.getJob = async (req, res) => {
   try {
+    await expireJobsPastApplicationDeadline();
+
     const { jobId } = req.params;
 
     const job = await Job.findById(jobId)
@@ -311,12 +333,22 @@ exports.getJob = async (req, res) => {
       return res.status(404).json({ message: "Job not found" });
     }
 
-    // Check if the viewer is the job owner
+    // Check if the viewer is the job owner (employer may be populated)
     const viewerId = req.user?.id;
-    const isOwner = viewerId && job.employer.toString() === viewerId;
+    const rawEmployer = job.employer;
+    const ownerId =
+      rawEmployer &&
+      typeof rawEmployer === "object" &&
+      rawEmployer._id
+        ? rawEmployer._id.toString()
+        : String(rawEmployer);
+    const isOwner = Boolean(viewerId && ownerId === viewerId);
 
-    // If job is closed and viewer is not the owner, return 404
-    if (job.status === "closed" && !isOwner) {
+    // If job is closed/expired and viewer is not the owner, return 404
+    if (
+      (job.status === "closed" || job.status === "expired") &&
+      !isOwner
+    ) {
       return res.status(404).json({ message: "Job not found" });
     }
 
@@ -326,7 +358,7 @@ exports.getJob = async (req, res) => {
       "Job View - ViewerId:",
       viewerId,
       "Job Owner:",
-      job.employer.toString(),
+      ownerId,
       "Is Owner:",
       isOwner,
     );
@@ -399,6 +431,8 @@ exports.closeJob = async (req, res) => {
 // Get employer's own jobs
 exports.getEmployerJobs = async (req, res) => {
   try {
+    await expireJobsPastApplicationDeadline();
+
     const employerId = req.user?.id;
     if (!employerId) {
       return res
@@ -489,6 +523,8 @@ exports.publishJob = async (req, res) => {
 // Get job recommendations for a user
 exports.getJobRecommendations = async (req, res) => {
   try {
+    await expireJobsPastApplicationDeadline();
+
     const userId = req.user.id;
     const { limit = 5 } = req.query;
 

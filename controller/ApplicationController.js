@@ -5,6 +5,9 @@ const Employer = require("../model/EmployerSchema");
 const User = require("../model/UserSchemas");
 const ReferralInvite = require("../model/ReferralInviteSchema");
 const { sendReferralInviteEmail } = require("../referralInviteEmail");
+const {
+  expireJobsPastApplicationDeadline,
+} = require("../utils/expireJobsByDeadline");
 
 // Helper function to recalculate awaitingFeedback count for a user
 const recalculateAwaitingFeedback = async (userId) => {
@@ -165,6 +168,8 @@ const recalculateAwaitingFeedback = async (userId) => {
 // Create new application (when user applies to job)
 exports.createApplication = async (req, res) => {
   try {
+    await expireJobsPastApplicationDeadline();
+
     const { jobId, expectedSalary, availability, coverLetter } = req.body;
     const applicantId = req.user.id;
 
@@ -963,6 +968,8 @@ exports.getEmployerInterviews = async (req, res) => {
 // 3) When the friend approves (via magic link), confirmReferralApplication creates the actual application
 exports.createReferralApplication = async (req, res) => {
   try {
+    await expireJobsPastApplicationDeadline();
+
     const {
       jobId,
       friendName,
@@ -1087,6 +1094,8 @@ exports.createReferralApplication = async (req, res) => {
 // Step 2: Confirm referral — called when the referred person clicks the magic link
 exports.confirmReferralApplication = async (req, res) => {
   try {
+    await expireJobsPastApplicationDeadline();
+
     const { token } = req.query;
     if (!token) {
       return res.status(400).json({ success: false, message: "Token is required" });
@@ -1408,7 +1417,7 @@ exports.getUserReferralHistory = async (req, res) => {
       })
       .populate({
         path: 'applicantId',
-        select: 'name email phoneNumber'
+        select: 'name fullName email phoneNumber professionalExperience jobPreferences',
       })
       .sort({ appliedDate: -1 })
       .limit(limit * 1)
@@ -1417,17 +1426,29 @@ exports.getUserReferralHistory = async (req, res) => {
     const total = await Application.countDocuments({ referredBy: referrerId });
 
     // Transform data for frontend
-    const referralHistory = referralApplications.map(app => ({
-      id: app._id,
-      referredUser: app.applicantId?.name || 'Unknown User',
-      referredUserEmail: app.applicantId?.email || '',
-      contactNo: app.applicantId?.phoneNumber || '',
-      jobTitle: app.jobId?.title || 'Unknown Job',
-      company: app.jobId?.companyName || 'Unknown Company',
-      date: app.appliedDate,
-      status: app.status,
-      applicationId: app._id,
-    }));
+    const referralHistory = referralApplications.map((app) => {
+      const applicant = app.applicantId;
+      const pe = applicant?.professionalExperience?.[0];
+      const currentCompany =
+        pe && pe.company ? String(pe.company).trim() : "";
+      const salaryExpectation = applicant?.jobPreferences?.salaryExpectation
+        ? String(applicant.jobPreferences.salaryExpectation).trim()
+        : "";
+      return {
+        id: app._id,
+        referredUser:
+          applicant?.fullName || applicant?.name || "Unknown User",
+        referredUserEmail: applicant?.email || "",
+        contactNo: applicant?.phoneNumber || "",
+        currentCompany: currentCompany || null,
+        salaryExpectation: salaryExpectation || null,
+        jobTitle: app.jobId?.title || "Unknown Job",
+        company: app.jobId?.companyName || "Unknown Company",
+        date: app.appliedDate,
+        status: app.status,
+        applicationId: app._id,
+      };
+    });
 
     // Get stats
     const stats = {
