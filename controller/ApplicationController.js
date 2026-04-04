@@ -9,6 +9,9 @@ const {
   expireJobsPastApplicationDeadline,
 } = require("../utils/expireJobsByDeadline");
 
+/** Points awarded to employer when marking an application hired; reversed on un-hire. */
+const EMPLOYER_HIRE_REWARD_POINTS = 50;
+
 // Helper function to recalculate awaitingFeedback count for a user
 const recalculateAwaitingFeedback = async (userId) => {
   try {
@@ -476,8 +479,8 @@ exports.updateApplicationStatus = async (req, res) => {
 
     if (status === 'hired' && application.status !== 'hired') {
       try {
-        await Employer.findByIdAndUpdate(employerId, { $inc: { points: 50 } });
-        console.log('[Points] +50 awarded to employer for hiring:', employerId);
+        await Employer.findByIdAndUpdate(employerId, { $inc: { points: EMPLOYER_HIRE_REWARD_POINTS } });
+        console.log('[Points] +' + EMPLOYER_HIRE_REWARD_POINTS + ' awarded to employer for hiring:', employerId);
       } catch (pointsErr) {
         console.error('[Points] Failed to award hiring points:', pointsErr);
       }
@@ -548,12 +551,15 @@ exports.updateApplicationStatus = async (req, res) => {
       } else {
         console.log('[ReferralPlacementPoints] No referrer found for application:', applicationId, '- This application was not a referral');
       }
-
-      // Note: Referral points (20 points) are now awarded immediately when referral application is created
-      // No need to award points again when status changes to hired
-      console.log('[ReferralPoints] Application marked as hired. Points were already awarded when referral was created.');
     } else if (status === 'hired' && application.status === 'hired') {
       console.log('[ReferralPoints] Application already marked as hired, skipping point award to prevent duplicates:', applicationId);
+    } else if (application.status === 'hired' && status !== 'hired') {
+      try {
+        await Employer.findByIdAndUpdate(employerId, { $inc: { points: -EMPLOYER_HIRE_REWARD_POINTS } });
+        console.log('[Points] -' + EMPLOYER_HIRE_REWARD_POINTS + ' deducted from employer for reversing hire:', employerId);
+      } catch (pointsErr) {
+        console.error('[Points] Failed to deduct hiring reversal points:', pointsErr);
+      }
     }
   } catch (error) {
     console.error('Error updating application status:', error);
