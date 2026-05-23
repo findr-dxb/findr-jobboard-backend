@@ -93,11 +93,14 @@ jobSchema.virtual('applicationCount').get(function() {
   return this.applications?.length || 0;
 });
 
-// Index for better search performance
-jobSchema.index({ title: 'text', description: 'text', company: 'text' });
+// Indexes for search, listings, and employer dashboards
+jobSchema.index({ title: 'text', description: 'text', companyName: 'text' });
 jobSchema.index({ location: 1, jobType: 1, experienceLevel: 1 });
-jobSchema.index({ status: 1, deadline: 1 });
+jobSchema.index({ status: 1, applicationDeadline: 1 });
 jobSchema.index({ employer: 1 });
+jobSchema.index({ employer: 1, status: 1 });
+jobSchema.index({ status: 1, createdAt: -1 });
+jobSchema.index({ employer: 1, createdAt: -1 });
 
 const Job = mongoose.model("Job", jobSchema);
 module.exports = Job;

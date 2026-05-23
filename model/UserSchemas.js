@@ -243,6 +243,15 @@ const findrUserSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Indexes (email already indexed via unique: true)
+findrUserSchema.index({ referralCode: 1 });
+findrUserSchema.index({ referredBy: 1 });
+findrUserSchema.index({ resetPasswordToken: 1 }, { sparse: true });
+findrUserSchema.index({ role: 1 });
+findrUserSchema.index({ loginStatus: 1 });
+findrUserSchema.index({ createdAt: -1 });
+findrUserSchema.index({ referredBy: 1, createdAt: -1 });
+
 // Pre-save hook to generate referral code for new users
 findrUserSchema.pre('save', async function (next) {
   // Only generate referral code if this is a new user and referralCode is empty
@@ -285,6 +294,14 @@ findrUserSchema.methods.getPublicProfile = function () {
 
   return userObject;
 };
+
+// Indexes (email unique index is created by schema `unique: true`)
+findrUserSchema.index({ referralCode: 1 });
+findrUserSchema.index({ referredBy: 1 });
+findrUserSchema.index({ role: 1 });
+findrUserSchema.index({ loginStatus: 1 });
+findrUserSchema.index({ createdAt: -1 });
+findrUserSchema.index({ resetPasswordToken: 1, resetPasswordExpiry: 1 });
 
 const FindrUser = mongoose.model("FindrUser", findrUserSchema);
 module.exports = FindrUser;

@@ -26,7 +26,7 @@ const grievanceSchema = new mongoose.Schema({
   timestamps: true
 });
 
-grievanceSchema.index({ userId: 1 });
+grievanceSchema.index({ userId: 1, createdAt: -1 });
 grievanceSchema.index({ createdAt: -1 });
 grievanceSchema.index({ email: 1 });
 

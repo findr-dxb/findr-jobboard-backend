@@ -111,10 +111,20 @@ const applicationSchema = new mongoose.Schema(
   },
 );
 
-// Indexes for better performance
-applicationSchema.index({ jobId: 1, applicantId: 1 }, { unique: true }); // Prevent duplicate applications
+// Indexes for lookups, dashboards, and referral flows
+applicationSchema.index({ jobId: 1, applicantId: 1 }, { unique: true });
 applicationSchema.index({ employerId: 1, status: 1 });
+applicationSchema.index({ employerId: 1, jobId: 1, status: 1 });
 applicationSchema.index({ appliedDate: -1 });
+applicationSchema.index({ applicantId: 1, viewedByEmployer: 1 });
+applicationSchema.index({ applicantId: 1, status: 1 });
+applicationSchema.index({ applicantId: 1, appliedDate: -1 });
+applicationSchema.index({ jobId: 1, status: 1 });
+applicationSchema.index({ referredBy: 1 });
+applicationSchema.index({ referredBy: 1, appliedDate: -1 });
+applicationSchema.index({ employerId: 1, appliedDate: -1 });
+applicationSchema.index({ status: 1, interviewDate: 1 });
+applicationSchema.index({ applicantId: 1, status: 1, viewedByEmployer: 1 });
 
 // Virtual to populate job details
 applicationSchema.virtual("jobDetails", {

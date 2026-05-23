@@ -33,8 +33,8 @@ const authMiddleware = async (req, res, next) => {
         blocked: true 
       });
     }
-    
-    // Add user from payload
+
+    req.userDoc = user;
     req.user = decoded;
     next();
   } catch (error) {

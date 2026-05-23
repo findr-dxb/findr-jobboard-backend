@@ -46,6 +46,17 @@ const referralInviteSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// token: unique in schema
+referralInviteSchema.index({ referrerId: 1, email: 1, jobId: 1 });
+referralInviteSchema.index({ referrerId: 1, status: 1 });
+referralInviteSchema.index({ email: 1, status: 1 });
+referralInviteSchema.index({ jobId: 1, status: 1 });
+referralInviteSchema.index({ createdAt: -1 });
+referralInviteSchema.index({ token: 1 }, { unique: true });
+referralInviteSchema.index({ referrerId: 1, email: 1, jobId: 1 });
+referralInviteSchema.index({ referrerId: 1, status: 1 });
+referralInviteSchema.index({ email: 1, status: 1 });
+referralInviteSchema.index({ jobId: 1, status: 1 });
 referralInviteSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const ReferralInvite = mongoose.model("ReferralInvite", referralInviteSchema);

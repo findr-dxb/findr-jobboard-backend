@@ -115,7 +115,9 @@ exports.getEmployerProfileDetails = async (req, res) => {
         profileCompleted: publicProfile.profileCompleted || 0,
         membershipTier: publicProfile.membershipTier || "Blue",
         referralCode: publicProfile.referralCode || employer.referralCode || "",
-        
+        linkedIn: employer.linkedIn || false,
+        instagram: employer.instagram || false,
+
         // Timestamps
         createdAt: publicProfile.createdAt,
         updatedAt: publicProfile.updatedAt,

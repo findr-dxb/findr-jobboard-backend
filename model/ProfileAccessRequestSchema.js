@@ -34,9 +34,13 @@ const profileAccessRequestSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// token: unique in schema
 profileAccessRequestSchema.index({ requesterId: 1, targetUserId: 1, status: 1 });
-profileAccessRequestSchema.index({ token: 1 });
-profileAccessRequestSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // TTL optional; we also check in code
+profileAccessRequestSchema.index({ requesterId: 1, status: 1 });
+profileAccessRequestSchema.index({ targetUserId: 1, status: 1 });
+profileAccessRequestSchema.index({ requesterId: 1, targetUserId: 1 });
+profileAccessRequestSchema.index({ createdAt: -1 });
+profileAccessRequestSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const ProfileAccessRequest = mongoose.model("ProfileAccessRequest", profileAccessRequestSchema);
 module.exports = ProfileAccessRequest;

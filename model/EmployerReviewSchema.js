@@ -49,8 +49,11 @@ const employerReviewSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Ensure one review per employer-application combination
 employerReviewSchema.index({ employerId: 1, applicationId: 1 }, { unique: true });
+employerReviewSchema.index({ employerId: 1, status: 1 });
+employerReviewSchema.index({ employerId: 1, createdAt: -1 });
+employerReviewSchema.index({ applicationId: 1 });
+employerReviewSchema.index({ applicantId: 1 });
 
 const EmployerReview = mongoose.model("EmployerReview", employerReviewSchema);
 module.exports = EmployerReview;

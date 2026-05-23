@@ -479,38 +479,12 @@ exports.getUserProfileDetails = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized. Please login first." });
     }
 
-    // Find user based on role
-    let user;
-    if (userRole === 'employer') {
-      user = await Employer.findById(userId).select('-password');
-    } else {
-      user = await User.findById(userId).select('-password');
-    }
-    
+    const user = req.userDoc;
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
     const publicProfile = user.getPublicProfile ? user.getPublicProfile() : user.toObject();
-
-    // Recalculate awaitingFeedback count to ensure accuracy (only for jobseekers)
-    if (userRole !== 'employer') {
-      const Application = require("../model/ApplicationSchema");
-      const viewedApplicationsCount = await Application.countDocuments({
-        applicantId: userId,
-        viewedByEmployer: true
-      });
-      
-      // Update the user's awaitingFeedback count if it's different
-      if (publicProfile.applications?.awaitingFeedback !== viewedApplicationsCount) {
-        await User.findByIdAndUpdate(userId, {
-          'applications.awaitingFeedback': viewedApplicationsCount
-        });
-        // Update the publicProfile object
-        if (!publicProfile.applications) publicProfile.applications = {};
-        publicProfile.applications.awaitingFeedback = viewedApplicationsCount;
-      }
-    }
 
     // Build response data based on role
     const responseData = {
@@ -548,6 +522,7 @@ exports.getUserProfileDetails = async (req, res) => {
       responseData.location = publicProfile.location || "";
       responseData.dateOfBirth = publicProfile.dateOfBirth || null;
       responseData.nationality = publicProfile.nationality || "";
+      responseData.visaExpiryDate = publicProfile.visaExpiryDate || null;
       responseData.emirateId = publicProfile.emirateId || "";
       responseData.passportNumber = publicProfile.passportNumber || "";
       responseData.introVideo = publicProfile.introVideo || "";
@@ -1085,8 +1060,8 @@ exports.followSocialMedia = async (req, res) => {
       // Set the field to true
       user[fieldName] = true;
       
-      // Award 10 points
-      pointsAwarded = 10;
+     
+      pointsAwarded = 50;
       
       // Initialize rewards if it doesn't exist
       if (!user.rewards) {
