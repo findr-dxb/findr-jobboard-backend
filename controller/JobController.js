@@ -8,7 +8,6 @@ const Application = require("../model/ApplicationSchema");
 const Employer = require("../model/EmployerSchema");
 const ReferralInvite = require("../model/ReferralInviteSchema");
 
-// Create a new job
 exports.createJob = async (req, res) => {
   try {
     const employerId = req.user?.id;
@@ -18,10 +17,8 @@ exports.createJob = async (req, res) => {
         .json({ message: "Unauthorized. Please login as an employer." });
     }
 
-    // Handle salary: convert from min/max object to single amount if needed
     let salaryAmount = req.body.salary;
     if (req.body.salary && typeof req.body.salary === "object") {
-      // If salary is an object with min/max, use min (or average if both exist)
       if (req.body.salary.min !== undefined) {
         salaryAmount = req.body.salary.min;
       } else if (req.body.salary.max !== undefined) {
@@ -35,7 +32,7 @@ exports.createJob = async (req, res) => {
       ...req.body,
       salary: salaryAmount,
       employer: employerId,
-      status: "active", // Default status for new jobs
+      status: "active", 
     };
 
     const newJob = new Job(jobData);
@@ -96,7 +93,6 @@ exports.createJob = async (req, res) => {
                   newJob._id.toString(),
                 );
               } catch (err) {
-                // Individual email error handled silently
               }
             }
           });
@@ -108,14 +104,19 @@ exports.createJob = async (req, res) => {
           }
         }
       } catch (err) {
-        // Email error handled silently
       }
     });
   } catch (error) {
-    console.error(error);
+    console.error("createJob:", error);
+
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        message: "Please fill in all required fields before posting your job.",
+      });
+    }
+
     res.status(500).json({
-      message: "Failed to create job",
-      error: error.message,
+      message: "We could not post your job right now. Please try again in a few minutes.",
     });
   }
 };
