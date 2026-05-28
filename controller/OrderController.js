@@ -1,4 +1,5 @@
 const User = require("../model/UserSchemas");
+const { calculateJobseekerProfileCompletion } = require("../utils/jobseekerProfileCompletion");
 
 // Create new order
 exports.createOrder = async (req, res) => {
@@ -12,105 +13,8 @@ exports.createOrder = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Calculate user's actual points based on profile completion (same as frontend)
-    const calculateProfilePoints = (profile) => {
-      let completed = 0;
-      const totalFields = 24;
-
-      // Personal Info (9 fields - employmentVisa removed)
-      if (profile?.fullName) completed++;
-      if (profile?.email) completed++;
-      if (profile?.phoneNumber) completed++;
-      if (profile?.location) completed++;
-      if (profile?.dateOfBirth) completed++;
-      if (profile?.nationality) completed++;
-      if (profile?.professionalSummary) completed++;
-      if (profile?.emirateId) completed++;
-      if (profile?.passportNumber) completed++;
-
-      // Experience (4 fields)
-      const exp = profile?.professionalExperience?.[0];
-      if (exp?.currentRole) completed++;
-      if (exp?.company) completed++;
-      if (exp?.yearsOfExperience) completed++;
-      if (exp?.industry) completed++;
-
-      // Education (4 fields)
-      const edu = profile?.education?.[0];
-      if (edu?.highestDegree) completed++;
-      if (edu?.institution) completed++;
-      if (edu?.yearOfGraduation) completed++;
-      if (edu?.gradeCgpa) completed++;
-
-      // Skills, Preferences, Certifications, Resume (4 fields)
-      if (profile?.skills && profile.skills.length > 0) completed++;
-      if (profile?.jobPreferences?.preferredJobType && profile.jobPreferences.preferredJobType.length > 0) completed++;
-      if (profile?.certifications && profile.certifications.length > 0) completed++;
-      if (profile?.jobPreferences?.resumeAndDocs && profile.jobPreferences.resumeAndDocs.length > 0) completed++;
-
-      // Social Links (3 fields)
-      if (profile?.socialLinks?.linkedIn) completed++;
-      if (profile?.socialLinks?.instagram) completed++;
-      if (profile?.socialLinks?.twitterX) completed++;
-
-      const percentage = Math.round((completed / totalFields) * 100);
-      const calculatedPoints = 50 + percentage * 2; // Base 50 + 2 points per percentage (100% = 250 points)
-      const applicationPoints = profile?.rewards?.applyForJobs || 0; // Points from job applications
-      const rmServicePoints = profile?.rewards?.rmService || 0; // Points from RM service purchase
-      const totalPoints = calculatedPoints + applicationPoints + rmServicePoints;
-
-      return totalPoints;
-    };
-
-    // Calculate current points components
-    let completed = 0;
-    const totalFields = 24;
-    if (user?.fullName) completed++;
-    if (user?.email) completed++;
-    if (user?.phoneNumber) completed++;
-    if (user?.location) completed++;
-    if (user?.dateOfBirth) completed++;
-    if (user?.nationality) completed++;
-    if (user?.professionalSummary) completed++;
-    if (user?.emirateId) completed++;
-    if (user?.passportNumber) completed++;
-    const exp = user?.professionalExperience?.[0];
-    if (exp?.currentRole) completed++;
-    if (exp?.company) completed++;
-    if (exp?.yearsOfExperience) completed++;
-    if (exp?.industry) completed++;
-    const edu = user?.education?.[0];
-    if (edu?.highestDegree) completed++;
-    if (edu?.institution) completed++;
-    if (edu?.yearOfGraduation) completed++;
-    if (edu?.gradeCgpa) completed++;
-    if (user?.skills && user.skills.length > 0) completed++;
-    if (user?.jobPreferences?.preferredJobType && user.jobPreferences.preferredJobType.length > 0) completed++;
-    if (user?.certifications && user.certifications.length > 0) completed++;
-    if (user?.jobPreferences?.resumeAndDocs && user.jobPreferences.resumeAndDocs.length > 0) completed++;
-    if (user?.socialLinks?.linkedIn) completed++;
-    if (user?.socialLinks?.instagram) completed++;
-    if (user?.socialLinks?.twitterX) completed++;
-
-    // Helper function for tier determination (for display purposes only)
-    const determineUserTier = (basePoints, yearsExp, isEmirati) => {
-      if (isEmirati) return "Platinum";
-      else if (basePoints >= 500) return "Platinum";
-      else if (yearsExp >= 5) return "Gold";
-      else if (yearsExp >= 2 && yearsExp <= 5) return "Silver";
-      else return "Blue";
-    };
-
-    const percentage = Math.round((completed / totalFields) * 100);
-    const basePoints = 50 + percentage * 2;
-    
-    // Determine tier (for display purposes only, not used in calculation)
-    const yearsExp = exp?.yearsOfExperience || 0;
-    const isEmirati = user?.nationality?.toLowerCase()?.includes("emirati");
-    const tier = determineUserTier(basePoints, yearsExp, isEmirati);
-    
-    // Use base points directly without multiplier
-    const calculatedPoints = basePoints;
+    const completion = calculateJobseekerProfileCompletion(user);
+    const calculatedPoints = completion.profilePoints;
     
     const applicationPoints = user.rewards?.applyForJobs || 0;
     const currentRmServicePoints = user.rewards?.rmService || 0;

@@ -157,50 +157,12 @@ app.post('/api/v1/stripe/webhook', async (req, res) => {
       const pointsUsed = parseInt(session.metadata?.pointsUsed || '0');
       const totalAmount = parseFloat(session.metadata?.totalAmount || '2500');
 
-      // Calculate points (same logic as OrderController)
-      const calculateProfilePoints = (profile) => {
-        let completed = 0;
-        const totalFields = 24;
-
-        if (profile?.fullName) completed++;
-        if (profile?.email) completed++;
-        if (profile?.phoneNumber) completed++;
-        if (profile?.location) completed++;
-        if (profile?.dateOfBirth) completed++;
-        if (profile?.nationality) completed++;
-        if (profile?.professionalSummary) completed++;
-        if (profile?.emirateId) completed++;
-        if (profile?.passportNumber) completed++;
-
-        const exp = profile?.professionalExperience?.[0];
-        if (exp?.currentRole) completed++;
-        if (exp?.company) completed++;
-        if (exp?.yearsOfExperience) completed++;
-        if (exp?.industry) completed++;
-
-        const edu = profile?.education?.[0];
-        if (edu?.highestDegree) completed++;
-        if (edu?.institution) completed++;
-        if (edu?.yearOfGraduation) completed++;
-        if (edu?.gradeCgpa) completed++;
-
-        if (profile?.skills && profile.skills.length > 0) completed++;
-        if (profile?.jobPreferences?.preferredJobType && profile.jobPreferences.preferredJobType.length > 0) completed++;
-        if (profile?.certifications && profile.certifications.length > 0) completed++;
-        if (profile?.jobPreferences?.resumeAndDocs && profile.jobPreferences.resumeAndDocs.length > 0) completed++;
-        if (profile?.socialLinks?.linkedIn) completed++;
-        if (profile?.socialLinks?.instagram) completed++;
-        if (profile?.socialLinks?.twitterX) completed++;
-
-        const percentage = Math.round((completed / totalFields) * 100);
-        const calculatedPoints = 50 + percentage * 2;
-        const applicationPoints = profile?.rewards?.applyForJobs || 0;
-        const currentRmServicePoints = profile?.rewards?.rmService || 0;
-
-        return calculatedPoints + applicationPoints + currentRmServicePoints;
-      };
-
-      const currentTotalPoints = calculateProfilePoints(user);
+      const { calculateJobseekerProfileCompletion } = require("./utils/jobseekerProfileCompletion");
+      const completion = calculateJobseekerProfileCompletion(user);
+      const applicationPoints = user?.rewards?.applyForJobs || 0;
+      const currentRmServicePoints = user?.rewards?.rmService || 0;
+      const currentTotalPoints =
+        completion.profilePoints + applicationPoints + currentRmServicePoints;
       const currentDeductedPoints = user.deductedPoints || 0;
       const newDeductedPoints = currentDeductedPoints + pointsUsed;
 

@@ -8,6 +8,7 @@ const { sendReferralInviteEmail } = require("../referralInviteEmail");
 const {
   expireJobsPastApplicationDeadline,
 } = require("../utils/expireJobsByDeadline");
+const { calculateJobseekerProfileCompletion } = require("../utils/jobseekerProfileCompletion");
 
 /** Points awarded to employer when marking an application hired; reversed on un-hire. */
 const EMPLOYER_HIRE_REWARD_POINTS = 50;
@@ -1217,37 +1218,8 @@ exports.confirmReferralApplication = async (req, res) => {
         const referrer = await User.findById(invite.referrerId);
         if (!referrer) return;
 
-        let completed = 0;
-        const totalFields = 24;
-        if (referrer.fullName) completed++;
-        if (referrer.email) completed++;
-        if (referrer.phoneNumber) completed++;
-        if (referrer.location) completed++;
-        if (referrer.dateOfBirth) completed++;
-        if (referrer.nationality) completed++;
-        if (referrer.professionalSummary) completed++;
-        if (referrer.emirateId) completed++;
-        if (referrer.passportNumber) completed++;
-        const exp = referrer.professionalExperience?.[0];
-        if (exp?.currentRole) completed++;
-        if (exp?.company) completed++;
-        if (exp?.yearsOfExperience) completed++;
-        if (exp?.industry) completed++;
-        const edu = referrer.education?.[0];
-        if (edu?.highestDegree) completed++;
-        if (edu?.institution) completed++;
-        if (edu?.yearOfGraduation) completed++;
-        if (edu?.gradeCgpa) completed++;
-        if (referrer.skills?.length > 0) completed++;
-        if (referrer.jobPreferences?.preferredJobType?.length > 0) completed++;
-        if (referrer.certifications?.length > 0) completed++;
-        if (referrer.jobPreferences?.resumeAndDocs?.length > 0) completed++;
-        if (referrer.socialLinks?.linkedIn) completed++;
-        if (referrer.socialLinks?.instagram) completed++;
-        if (referrer.socialLinks?.twitterX) completed++;
-
-        const percentage = Math.round((completed / totalFields) * 100);
-        const basePoints = 50 + percentage * 2;
+        const referrerCompletion = calculateJobseekerProfileCompletion(referrer);
+        const basePoints = referrerCompletion.profilePoints;
         const yearsExp = referrer.professionalExperience?.[0]?.yearsOfExperience || 0;
         const isEmirati = referrer.nationality?.toLowerCase()?.includes("emirati");
         const tier = isEmirati || basePoints >= 500 ? "Platinum" : yearsExp >= 5 ? "Gold" : yearsExp >= 2 ? "Silver" : "Blue";

@@ -1,6 +1,7 @@
 const User = require("../model/UserSchemas");
 const Employer = require("../model/EmployerSchema");
 const ProfileAccessRequest = require("../model/ProfileAccessRequestSchema");
+const { calculateJobseekerProfileCompletion } = require("../utils/jobseekerProfileCompletion");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 require("dotenv").config();
@@ -87,49 +88,7 @@ exports.signup = async (req, res) => {
           return;
         }
 
-        // Calculate referrer's profile completion to determine tier
-        let completed = 0;
-        const totalFields = 24;
-
-        // Personal Info (9 fields)
-        if (referrer.fullName) completed++;
-        if (referrer.email) completed++;
-        if (referrer.phoneNumber) completed++;
-        if (referrer.location) completed++;
-        if (referrer.dateOfBirth) completed++;
-        if (referrer.nationality) completed++;
-        if (referrer.professionalSummary) completed++;
-        if (referrer.emirateId) completed++;
-        if (referrer.passportNumber) completed++;
-
-        // Experience (4 fields)
-        if (referrer.professionalExperience && referrer.professionalExperience.length > 0) {
-          const exp = referrer.professionalExperience[0];
-          if (exp?.currentRole) completed++;
-          if (exp?.company) completed++;
-          if (exp?.yearsOfExperience) completed++;
-          if (exp?.industry) completed++;
-        }
-
-        // Education (4 fields)
-        if (referrer.education && referrer.education.length > 0) {
-          const edu = referrer.education[0];
-          if (edu?.highestDegree) completed++;
-          if (edu?.institution) completed++;
-          if (edu?.yearOfGraduation) completed++;
-          if (edu?.gradeCgpa) completed++;
-        }
-
-        // Skills, Preferences, Certifications, Resume (4 fields)
-        if (referrer.skills && referrer.skills.length > 0) completed++;
-        if (referrer.jobPreferences?.preferredJobType && referrer.jobPreferences.preferredJobType.length > 0) completed++;
-        if (referrer.certifications && referrer.certifications.length > 0) completed++;
-        if (referrer.jobPreferences?.resumeAndDocs && referrer.jobPreferences.resumeAndDocs.length > 0) completed++;
-
-        // Social Links (3 fields)
-        if (referrer.socialLinks?.linkedIn) completed++;
-        if (referrer.socialLinks?.instagram) completed++;
-        if (referrer.socialLinks?.twitterX) completed++;
+        const referrerCompletion = calculateJobseekerProfileCompletion(referrer);
 
         // Helper functions for tier multiplier calculation
         const getExperienceLevel = (yearsExp) => {
@@ -158,8 +117,8 @@ exports.signup = async (req, res) => {
         };
 
         // Calculate referrer's base points and tier
-        const percentage = Math.round((completed / totalFields) * 100);
-        const basePoints = 50 + (percentage * 2);
+        const percentage = referrerCompletion.percentage;
+        const basePoints = referrerCompletion.profilePoints;
         const yearsExp = referrer?.professionalExperience?.[0]?.yearsOfExperience || 0;
         const isEmirati = referrer?.nationality?.toLowerCase()?.includes("emirati");
         const experienceLevel = getExperienceLevel(yearsExp);
@@ -208,48 +167,15 @@ exports.signup = async (req, res) => {
 
     
     if (role === "jobseeker") {
-      let completed = 0;
-      const totalFields = 24;
+      const completion = calculateJobseekerProfileCompletion(newUser);
+      const calculatedPoints = completion.profilePoints;
 
-      if (newUser.fullName || newUser.name) completed++;
-      if (newUser.email) completed++;
-      if (newUser.phoneNumber) completed++;
-      if (newUser.location) completed++;
-      if (newUser.dateOfBirth) completed++;
-      if (newUser.nationality) completed++;
-      if (newUser.professionalSummary) completed++;
-      if (newUser.emirateId) completed++;
-      if (newUser.passportNumber) completed++;
-      
-      const exp = newUser.professionalExperience?.[0];
-      if (exp?.currentRole) completed++;
-      if (exp?.company) completed++;
-      if (exp?.yearsOfExperience) completed++;
-      if (exp?.industry) completed++;
-      
-      const edu = newUser.education?.[0];
-      if (edu?.highestDegree) completed++;
-      if (edu?.institution) completed++;
-      if (edu?.yearOfGraduation) completed++;
-      if (edu?.gradeCgpa) completed++;
-      
-      if (newUser.skills && newUser.skills.length > 0) completed++;
-      if (newUser.jobPreferences?.preferredJobType && newUser.jobPreferences.preferredJobType.length > 0) completed++;
-      if (newUser.certifications && newUser.certifications.length > 0) completed++;
-      if (newUser.jobPreferences?.resumeAndDocs && newUser.jobPreferences.resumeAndDocs.length > 0) completed++;
-      
-      if (newUser.socialLinks?.linkedIn) completed++;
-      if (newUser.socialLinks?.instagram) completed++;
-      if (newUser.socialLinks?.twitterX) completed++;
-
-      const percentage = Math.round((completed / totalFields) * 100);
-      const calculatedPoints = 50 + percentage * 2;
-      
       newUser.rewards.totalPoints = calculatedPoints;
       newUser.points = calculatedPoints;
-      newUser.rewards.completeProfile = percentage;
+      newUser.rewards.completeProfile = calculatedPoints;
+      newUser.profileCompleted = completion.percentage.toString();
       await newUser.save();
-      
+
       newUser = await Model.findById(newUser._id);
     }
 
@@ -689,71 +615,9 @@ exports.updateProfile = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Calculate profile completion based on the updated user data
-    // Match frontend calculation logic (24 total fields - employmentVisa removed)
-    let completed = 0;
-    const totalFields = 24;
-
-    // Personal Info (9 fields) - matching frontend logic exactly
-    if (updatedUser.fullName) completed++;
-    if (updatedUser.email) completed++;
-    if (updatedUser.phoneNumber) completed++;
-    if (updatedUser.location) completed++;
-    if (updatedUser.dateOfBirth) completed++;
-    if (updatedUser.nationality) completed++;
-    if (updatedUser.professionalSummary) completed++;
-    if (updatedUser.emirateId) completed++;
-    if (updatedUser.passportNumber) completed++;
-    
-    // Experience (4 fields)
-    if (updatedUser.professionalExperience && updatedUser.professionalExperience.length > 0) {
-      const exp = updatedUser.professionalExperience[0];
-      if (exp?.currentRole) completed++;
-      if (exp?.company) completed++;
-      if (exp?.yearsOfExperience) completed++;
-      if (exp?.industry) completed++;
-    }
-
-    // Education (4 fields)  
-    if (updatedUser.education && updatedUser.education.length > 0) {
-      const edu = updatedUser.education[0];
-      if (edu?.highestDegree) completed++;
-      if (edu?.institution) completed++;
-      if (edu?.yearOfGraduation) completed++;
-      if (edu?.gradeCgpa) completed++;
-    }
-
-    // Skills, Preferences, Certifications, Resume (4 fields)
-    if (updatedUser.skills && updatedUser.skills.length > 0) completed++;
-    if (updatedUser.jobPreferences?.preferredJobType && updatedUser.jobPreferences.preferredJobType.length > 0) completed++;
-    if (updatedUser.certifications && updatedUser.certifications.length > 0) completed++;
-    if (updatedUser.jobPreferences?.resumeAndDocs && updatedUser.jobPreferences.resumeAndDocs.length > 0) completed++;
-
-    // Social Links (3 fields)
-    if (updatedUser.socialLinks?.linkedIn) completed++;
-    if (updatedUser.socialLinks?.instagram) completed++;
-    if (updatedUser.socialLinks?.twitterX) completed++;
-
-    // Helper function for tier determination (for display purposes only)
-    const determineUserTier = (basePoints, yearsExp, isEmirati) => {
-      if (isEmirati) return "Platinum";
-      else if (basePoints >= 500) return "Platinum";
-      else if (yearsExp >= 5) return "Gold";
-      else if (yearsExp >= 2 && yearsExp <= 5) return "Silver";
-      else return "Blue";
-    };
-
-    // Calculate percentage and base points
-    const percentage = Math.round((completed / totalFields) * 100);
-    const basePoints = 50 + (percentage * 2); // Base 50 + 2 points per percentage
-    
-    // Determine tier (for display purposes only, not used in calculation)
-    const yearsExp = updatedUser?.professionalExperience?.[0]?.yearsOfExperience || 0;
-    const isEmirati = updatedUser?.nationality?.toLowerCase()?.includes("emirati");
-    const tier = determineUserTier(basePoints, yearsExp, isEmirati);
-    
-    // Use base points directly without multiplier
-    const calculatedPoints = basePoints;
+    const completion = calculateJobseekerProfileCompletion(updatedUser);
+    const percentage = completion.percentage;
+    const calculatedPoints = completion.profilePoints;
     
     // Add other points
     const applicationPoints = updatedUser?.rewards?.applyForJobs || 0;
@@ -819,56 +683,11 @@ exports.checkProfileEligibility = async (req, res) => {
       });
     }
 
-    // Calculate profile completion based on the same logic as updateProfile
-    let completed = 0;
-    const totalFields = 24;
-    const missingFields = [];
-
-    // Personal Info (9 fields) - matching frontend logic exactly
-    if (user.fullName) completed++; else missingFields.push("Full Name");
-    if (user.email) completed++; else missingFields.push("Email");
-    if (user.phoneNumber) completed++; else missingFields.push("Phone Number");
-    if (user.location) completed++; else missingFields.push("Location");
-    if (user.dateOfBirth) completed++; else missingFields.push("Date of Birth");
-    if (user.nationality) completed++; else missingFields.push("Nationality");
-    if (user.professionalSummary) completed++; else missingFields.push("Professional Summary");
-    if (user.emirateId) completed++; else missingFields.push("Emirates ID");
-    if (user.passportNumber) completed++; else missingFields.push("Passport Number");
-
-    // Experience (4 fields)
-    const exp = user.professionalExperience?.[0];
-    if (exp?.currentRole) completed++; else missingFields.push("Current Role");
-    if (exp?.company) completed++; else missingFields.push("Company");
-    if (exp?.yearsOfExperience) completed++; else missingFields.push("Years of Experience");
-    if (exp?.industry) completed++; else missingFields.push("Industry");
-
-    // Education (4 fields)
-    const edu = user.education?.[0];
-    if (edu?.highestDegree) completed++; else missingFields.push("Highest Degree");
-    if (edu?.institution) completed++; else missingFields.push("Institution");
-    if (edu?.yearOfGraduation) completed++; else missingFields.push("Year of Graduation");
-    if (edu?.gradeCgpa) completed++; else missingFields.push("Grade/CGPA");
-
-    // Skills, Preferences, Certifications (3 fields)
-    if (user.skills && user.skills.length > 0) completed++; else missingFields.push("Skills");
-    if (user.jobPreferences?.preferredJobType && user.jobPreferences.preferredJobType.length > 0) completed++; else missingFields.push("Job Preferences");
-    if (user.certifications && user.certifications.length > 0) completed++; else missingFields.push("Certifications");
-
-    // Resume check - comprehensive check for all possible resume locations
-    const hasResume = !!(user.resumeDocument && user.resumeDocument.trim() !== '') ||
-                     !!(user.resumeUrl && user.resumeUrl.trim() !== '') ||
-                     !!(user.resume && (typeof user.resume === 'string' ? user.resume.trim() !== '' : user.resume)) ||
-                     !!(user.jobPreferences?.resumeAndDocs && user.jobPreferences.resumeAndDocs.length > 0);
-    
-    if (hasResume) completed++; else missingFields.push("Resume (Required for job applications)");
-
-    // Social Links (3 fields)
-    if (user.socialLinks?.linkedIn) completed++; else missingFields.push("LinkedIn");
-    if (user.socialLinks?.instagram) completed++; else missingFields.push("Instagram");
-    if (user.socialLinks?.twitterX) completed++; else missingFields.push("Twitter/X");
-
-    const percentage = Math.round((completed / totalFields) * 100);
-    const canApply = percentage >= 80 && hasResume;
+    const completion = calculateJobseekerProfileCompletion(user);
+    const percentage = completion.percentage;
+    const missingFields = completion.missingFields;
+    const hasResume = completion.hasResume;
+    const canApply = completion.canApply;
 
     res.status(200).json({
       success: true,
@@ -876,8 +695,8 @@ exports.checkProfileEligibility = async (req, res) => {
         canApply: canApply,
         profileCompletion: {
           percentage: percentage,
-          completed: completed,
-          total: totalFields,
+          completed: percentage,
+          total: 100,
           missingFields: missingFields
         },
         resumeStatus: {
