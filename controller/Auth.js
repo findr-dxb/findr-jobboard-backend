@@ -575,39 +575,46 @@ exports.updateProfile = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized. Please login first." });
     }
 
-    // First update the profile fields
+
+    const updateFields = {
+      ...(fullName && { fullName }),
+      ...(email && { email }),
+      ...(phoneNumber && { phoneNumber }),
+      ...(location && { location }),
+      ...(dateOfBirth && { dateOfBirth }),
+      ...(nationality && { nationality }),
+      ...(emirateId && { emirateId }),
+      ...(passportNumber && { passportNumber }),
+      ...(visaExpiryDate !== undefined && { visaExpiryDate: visaExpiryDate || null }),
+      ...(introVideo && { introVideo }),
+      ...(professionalSummary && { professionalSummary }),
+      
+
+      ...(professionalExperience && { professionalExperience }),
+      ...(education && { education }),
+      ...(skills && { skills }),
+      ...(certifications && { certifications }),
+      
+      ...(profilePicture && { profilePicture }),
+      
+      ...(resumeDocument && { resumeDocument }),
+    };
+
+    if (jobPreferences) {
+      for (const [key, val] of Object.entries(jobPreferences)) {
+        updateFields[`jobPreferences.${key}`] = val;
+      }
+    }
+
+    if (socialLinks) {
+      for (const [key, val] of Object.entries(socialLinks)) {
+        updateFields[`socialLinks.${key}`] = val;
+      }
+    }
+
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      {
-        $set: {
-          // Only update fields that are provided
-          ...(fullName && { fullName }),
-          ...(email && { email }),
-          ...(phoneNumber && { phoneNumber }),
-          ...(location && { location }),
-          ...(dateOfBirth && { dateOfBirth }),
-          ...(nationality && { nationality }),
-          ...(emirateId && { emirateId }),
-          ...(passportNumber && { passportNumber }),
-          ...(visaExpiryDate !== undefined && { visaExpiryDate: visaExpiryDate || null }),
-          ...(introVideo && { introVideo }),
-          ...(professionalSummary && { professionalSummary }),
-          
-          // Arrays and objects
-          ...(professionalExperience && { professionalExperience }),
-          ...(education && { education }),
-          ...(skills && { skills }),
-          ...(certifications && { certifications }),
-          ...(jobPreferences && { jobPreferences }),
-          ...(socialLinks && { socialLinks }),
-          
-          // Profile Picture
-          ...(profilePicture && { profilePicture }),
-          
-          // Resume Document
-          ...(resumeDocument && { resumeDocument }),
-        }
-      },
+      { $set: updateFields },
       { new: true } // Return updated document
     );
 

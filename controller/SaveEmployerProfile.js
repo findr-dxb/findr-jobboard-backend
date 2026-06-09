@@ -4,7 +4,6 @@ const Job = require("../model/JobSchema");
 const Application = require("../model/ApplicationSchema");
 const EmployerReview = require("../model/EmployerReviewSchema");
 
-// Get employer profile details
 exports.getEmployerProfileDetails = async (req, res) => {
   try {
     const employerId = req.user?.id;
@@ -14,9 +13,7 @@ exports.getEmployerProfileDetails = async (req, res) => {
 
     const employer = await Employer.findById(employerId)
       .select('-password')
-      .populate('postedJobs', 'title status createdAt applicationDeadline')
-      .populate('applications', 'status appliedDate jobId applicantId')
-      .populate('activeJobs', 'title status createdAt');
+      .populate('applications', 'status appliedDate jobId applicantId');
     
     if (!employer) {
       return res.status(404).json({ message: "Employer not found" });
@@ -33,6 +30,10 @@ exports.getEmployerProfileDetails = async (req, res) => {
       employer.referralCode = `FINDR${namePart}${randomNum}`;
       await employer.save();
     }
+    const [postedJobs, activeJobs] = await Promise.all([
+      Job.find({ employer: employerId }).select('title status createdAt applicationDeadline').lean(),
+      Job.find({ employer: employerId, status: 'active' }).select('title status createdAt').lean()
+    ]);
 
     const publicProfile = employer.getPublicProfile();
 
@@ -76,8 +77,8 @@ exports.getEmployerProfileDetails = async (req, res) => {
         },
         
         // Job Management
-        activeJobs: publicProfile.activeJobs || [],
-        postedJobs: publicProfile.postedJobs || [],
+        activeJobs: activeJobs,
+        postedJobs: postedJobs,
         applications: publicProfile.applications || [],
         
         // Subscription & Status
@@ -189,8 +190,7 @@ exports.getPublicCompanyProfile = async (req, res) => {
     }
 
     const employer = await Employer.findById(employerId)
-      .select('-password -applications -postedJobs -activeJobs -subscriptionPlan -subscriptionStatus -subscriptionExpiry -documents -hrServices -notifications -points -profileCompleted')
-      .populate('postedJobs', 'title status createdAt applicationDeadline views');
+      .select('-password -applications -postedJobs -activeJobs -subscriptionPlan -subscriptionStatus -subscriptionExpiry -documents -hrServices -notifications -points -profileCompleted');
     
     if (!employer) {
       return res.status(404).json({ 
@@ -198,6 +198,8 @@ exports.getPublicCompanyProfile = async (req, res) => {
         message: "Company not found" 
       });
     }
+
+    const postedJobs = await Job.find({ employer: employerId }).select('title status').lean();
 
     // Only return public information suitable for job seekers
     const publicCompanyData = {
@@ -221,8 +223,8 @@ exports.getPublicCompanyProfile = async (req, res) => {
         facebook: employer.socialLinks?.facebook || "",
       },
       // Add some computed fields for better UX
-      activeJobsCount: employer.postedJobs ? employer.postedJobs.filter(job => job.status === 'active').length : 0,
-      totalJobsPosted: employer.postedJobs ? employer.postedJobs.length : 0,
+      activeJobsCount: postedJobs ? postedJobs.filter(job => job.status === 'active').length : 0,
+      totalJobsPosted: postedJobs ? postedJobs.length : 0,
       memberSince: employer.createdAt,
     };
 

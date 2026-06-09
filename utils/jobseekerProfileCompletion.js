@@ -62,6 +62,8 @@ function calculateJobseekerProfileCompletion(user) {
     { label: "Location", ok: isFilled(user.location) },
     { label: "Date of Birth", ok: isFilled(user.dateOfBirth) },
     { label: "Nationality", ok: isFilled(user.nationality) },
+    { label: "Emirates ID", ok: isFilled(user.emirateId) },
+    { label: "Passport Number", ok: isFilled(user.passportNumber) },
     { label: "Professional Summary", ok: isFilled(user.professionalSummary) },
   ];
   if (isNonEmirati(nationality)) {
@@ -146,15 +148,20 @@ function calculateJobseekerProfileCompletion(user) {
   else missingFields.push("Skills");
 
   const prefs = user.jobPreferences || {};
-  const jobPrefsOk =
-    isFilled(prefs.preferredJobType) &&
-    (Array.isArray(prefs.preferredJobType)
-      ? prefs.preferredJobType.length > 0
-      : true) &&
-    isFilled(prefs.preferredLocation) &&
-    isFilled(prefs.availability);
-  if (jobPrefsOk) percentage += 5;
-  else missingFields.push("Job Preferences");
+  const preferredJobType = prefs.preferredJobType;
+  const jobTypeOk = Array.isArray(preferredJobType)
+    ? preferredJobType.length > 0
+    : isFilled(preferredJobType);
+
+  const prefChecks = [
+    { label: "Preferred Job Type", ok: jobTypeOk },
+    { label: "Preferred Location", ok: isFilled(prefs.preferredLocation) },
+    { label: "Availability", ok: isFilled(prefs.availability) }
+  ];
+
+  const prefScore = sectionScore(prefChecks, 5, "Job Preferences");
+  percentage += prefScore.score;
+  missingFields.push(...prefScore.missing);
 
   const rounded = Math.min(Math.round(percentage), 100);
   const resume = hasResume(user);

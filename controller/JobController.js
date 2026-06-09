@@ -17,6 +17,22 @@ exports.createJob = async (req, res) => {
         .json({ message: "Unauthorized. Please login as an employer." });
     }
 
+    const { title, location, experienceLevel } = req.body;
+    const company = req.body.companyName || req.body.company;
+
+    const existingJob = await Job.findOne({
+      title,
+      companyName: company,
+      location,
+      experienceLevel
+    });
+
+    if (existingJob) {
+      return res.status(409).json({
+        message: "Job already exists"
+      });
+    }
+
     let salaryAmount = req.body.salary;
     if (req.body.salary && typeof req.body.salary === "object") {
       if (req.body.salary.min !== undefined) {
