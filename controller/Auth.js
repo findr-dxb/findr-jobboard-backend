@@ -141,6 +141,24 @@ exports.signup = async (req, res) => {
         }, { new: true });
         
         if (updateResult) {
+          try {
+            const Reward = require("../model/RewardSchema");
+            const rewardTx = new Reward({
+              userId: referredBy,
+              userModel: "FindrUser",
+              rewardType: "referral",
+              points: multipliedReferralPoints,
+              rewardHistory: [{
+                description: `Referral Signup Bonus (Invited user: ${email})`,
+                date: new Date(),
+                points: multipliedReferralPoints
+              }]
+            });
+            await rewardTx.save();
+          } catch (logErr) {
+            console.error("Failed to log referral reward transaction:", logErr);
+          }
+
           console.log('[ReferralSignupPoints] Successfully awarded multiplied points to referrer for signup:', referredBy, {
             baseReferralPoints: baseReferralPoints,
             multiplier: multiplier,
@@ -633,6 +651,29 @@ exports.updateProfile = async (req, res) => {
     const referralPoints = updatedUser?.rewards?.referFriend || 0;
     const totalPoints = calculatedPoints + applicationPoints + rmServicePoints + socialMediaBonus + referralPoints;
     const calculatedProfileCompleted = percentage.toString();
+
+    // Log reward transaction if points increased
+    const prevPoints = updatedUser?.rewards?.completeProfile || 0;
+    const diffPoints = calculatedPoints - prevPoints;
+    if (diffPoints > 0) {
+      try {
+        const Reward = require("../model/RewardSchema");
+        const rewardTx = new Reward({
+          userId: userId,
+          userModel: "FindrUser",
+          rewardType: "activity",
+          points: diffPoints,
+          rewardHistory: [{
+            description: `Profile Completion progress: ${percentage}%`,
+            date: new Date(),
+            points: diffPoints
+          }]
+        });
+        await rewardTx.save();
+      } catch (logErr) {
+        console.error("Failed to log profile completion reward transaction:", logErr);
+      }
+    }
 
     // Update the user with calculated points and profile completion
     // Preserve socialMediaBonus if it exists, otherwise initialize it

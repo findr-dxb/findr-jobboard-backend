@@ -19,6 +19,10 @@ const {
   getMyNetwork,
 } = require("../controller/Auth");
 const authMiddleware = require("../middleware/auth");
+const {
+  getRewardHistory,
+  createRewardTransaction,
+} = require("../controller/RewardController");
 
 // Auth routes
 router.post("/signup", signup);
@@ -37,6 +41,10 @@ router.put("/profile/update", authMiddleware, updateProfile);
 router.get("/profile/details", authMiddleware, getUserProfileDetails);
 router.get("/profile/eligibility", authMiddleware, checkProfileEligibility);
 router.post("/profile/follow-social", authMiddleware, followSocialMedia);
+
+// Rewards routes (protected, accessible by both jobseekers and employers)
+router.get("/rewards/history", authMiddleware, getRewardHistory);
+router.post("/rewards/transaction", authMiddleware, createRewardTransaction);
 
 // User lookup route (protected)
 router.get("/users/lookup", authMiddleware, searchUserByIdentifier);

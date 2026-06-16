@@ -66,7 +66,40 @@ exports.createOrder = async (req, res) => {
         orders: order
       }
     }, { new: true });
-    
+
+    // Log reward transaction in DB
+    try {
+      const Reward = require("../model/RewardSchema");
+      const rewardTx = new Reward({
+        userId: userId,
+        userModel: "FindrUser",
+        rewardType: "activity",
+        points: 100,
+        rewardHistory: [{
+          description: `Purchased Service: ${service}`,
+          date: new Date(),
+          points: 100
+        }]
+      });
+      await rewardTx.save();
+
+      if (pointsUsed > 0) {
+        const deductTx = new Reward({
+          userId: userId,
+          userModel: "FindrUser",
+          rewardType: "withdraw",
+          points: -pointsUsed,
+          rewardHistory: [{
+            description: `Redeemed points for Service: ${service}`,
+            date: new Date(),
+            points: -pointsUsed
+          }]
+        });
+        await deductTx.save();
+      }
+    } catch (logErr) {
+      console.error("Failed to log order reward transaction:", logErr);
+    }
 
     // Send HTTP response FIRST
     res.status(201).json({

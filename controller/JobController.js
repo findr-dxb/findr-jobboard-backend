@@ -63,6 +63,24 @@ exports.createJob = async (req, res) => {
       try {
         await Employer.findByIdAndUpdate(employerId, { $inc: { points: 100 } });
 
+        try {
+          const Reward = require("../model/RewardSchema");
+          const rewardTx = new Reward({
+            userId: employerId,
+            userModel: "Employer",
+            rewardType: "activity",
+            points: 100,
+            rewardHistory: [{
+              description: `Posted a job: ${newJob.title}`,
+              date: new Date(),
+              points: 100
+            }]
+          });
+          await rewardTx.save();
+        } catch (logErr) {
+          console.error("Failed to log job posting reward transaction:", logErr);
+        }
+
         const {
           sendJobPostedEmail,
           sendJobNotificationEmail,

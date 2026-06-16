@@ -194,6 +194,40 @@ app.post('/api/v1/stripe/webhook', async (req, res) => {
         }
       });
 
+      // Log point transaction in DB
+      try {
+        const Reward = require("./model/RewardSchema");
+        const rewardTx = new Reward({
+          userId: userId,
+          userModel: "FindrUser",
+          rewardType: "activity",
+          points: 100,
+          rewardHistory: [{
+            description: "Purchased Virtual Relationship Manager Service",
+            date: new Date(),
+            points: 100
+          }]
+        });
+        await rewardTx.save();
+
+        if (pointsUsed > 0) {
+          const deductTx = new Reward({
+            userId: userId,
+            userModel: "FindrUser",
+            rewardType: "withdraw",
+            points: -pointsUsed,
+            rewardHistory: [{
+              description: "Redeemed points for Relationship Manager Service",
+              date: new Date(),
+              points: -pointsUsed
+            }]
+          });
+          await deductTx.save();
+        }
+      } catch (logErr) {
+        console.error("Failed to log RM service purchase reward transaction:", logErr);
+      }
+
       console.log('[StripeWebhook] RM Service activated for user:', userId);
       res.json({ received: true });
     } catch (error) {

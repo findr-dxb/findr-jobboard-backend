@@ -482,6 +482,26 @@ exports.updateApplicationStatus = async (req, res) => {
       try {
         await Employer.findByIdAndUpdate(employerId, { $inc: { points: EMPLOYER_HIRE_REWARD_POINTS } });
         console.log('[Points] +' + EMPLOYER_HIRE_REWARD_POINTS + ' awarded to employer for hiring:', employerId);
+        
+        // Log reward transaction for employer hiring
+        try {
+          const Reward = require("../model/RewardSchema");
+          const job = await Job.findById(application.jobId).select('title');
+          const rewardTx = new Reward({
+            userId: employerId,
+            userModel: "Employer",
+            rewardType: "activity",
+            points: EMPLOYER_HIRE_REWARD_POINTS,
+            rewardHistory: [{
+              description: `Hired candidate for job: ${job?.title || 'Job Openings'}`,
+              date: new Date(),
+              points: EMPLOYER_HIRE_REWARD_POINTS
+            }]
+          });
+          await rewardTx.save();
+        } catch (logErr) {
+          console.error("Failed to log employer hiring reward transaction:", logErr);
+        }
       } catch (pointsErr) {
         console.error('[Points] Failed to award hiring points:', pointsErr);
       }
@@ -536,6 +556,23 @@ exports.updateApplicationStatus = async (req, res) => {
                 newPoints: updateResult.points,
                 applicationId: applicationId
               });
+              try {
+                const Reward = require("../model/RewardSchema");
+                const rewardTx = new Reward({
+                  userId: referrerId,
+                  userModel: "FindrUser",
+                  rewardType: "placement",
+                  points: placementPoints,
+                  rewardHistory: [{
+                    description: `Job Placement referral reward for ${job.title}`,
+                    date: new Date(),
+                    points: placementPoints
+                  }]
+                });
+                await rewardTx.save();
+              } catch (logErr) {
+                console.error("Failed to log referral placement reward transaction:", logErr);
+              }
             } else {
               console.error('[ReferralPlacementPoints] ✗ Referrer not found:', referrerId);
             }
@@ -557,7 +594,24 @@ exports.updateApplicationStatus = async (req, res) => {
     } else if (application.status === 'hired' && status !== 'hired') {
       try {
         await Employer.findByIdAndUpdate(employerId, { $inc: { points: -EMPLOYER_HIRE_REWARD_POINTS } });
-        console.log('[Points] -' + EMPLOYER_HIRE_REWARD_POINTS + ' deducted from employer for reversing hire:', employerId);
+        try {
+          const Reward = require("../model/RewardSchema");
+          const job = await Job.findById(application.jobId).select('title');
+          const rewardTx = new Reward({
+            userId: employerId,
+            userModel: "Employer",
+            rewardType: "activity",
+            points: -EMPLOYER_HIRE_REWARD_POINTS,
+            rewardHistory: [{
+              description: `Reversal: Cancelled hire for job: ${job?.title || 'Job Openings'}`,
+              date: new Date(),
+              points: -EMPLOYER_HIRE_REWARD_POINTS
+            }]
+          });
+          await rewardTx.save();
+        } catch (logErr) {
+          console.error("Failed to log employer hire reversal transaction:", logErr);
+        }
       } catch (pointsErr) {
         console.error('[Points] Failed to deduct hiring reversal points:', pointsErr);
       }
@@ -577,8 +631,6 @@ exports.rateApplicant = async (req, res) => {
     const { applicationId } = req.params;
     const { rating, feedback } = req.body;
     const employerId = req.user.id;
-
-    // Verify application belongs to employer
     const application = await Application.findOne({ _id: applicationId, employerId });
     if (!application) {
       return res.status(404).json({ message: "Application not found or access denied" });
