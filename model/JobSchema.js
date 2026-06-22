@@ -84,6 +84,14 @@ const jobSchema = new mongoose.Schema(
       type: Number,
       default: 0
     },
+    createdAt: {
+      type: Date,
+      default: Date.now
+    },
+    expiredDate: {
+      type: Date,
+      default: Date.now + 15 * 24 * 60 * 60 * 1000
+    }
   },
   { 
     timestamps: true,
@@ -95,6 +103,11 @@ const jobSchema = new mongoose.Schema(
 // Virtual field for application count
 jobSchema.virtual('applicationCount').get(function() {
   return this.applications?.length || 0;
+});
+jobSchema.post('init', function(doc) {
+  if (doc.status === 'active' && doc.expiredDate && doc.expiredDate <= new Date()) {
+    doc.status = 'expired';
+  }
 });
 
 jobSchema.index({ title: 'text', description: 'text', companyName: 'text' });

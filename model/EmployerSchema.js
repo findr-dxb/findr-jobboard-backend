@@ -193,6 +193,14 @@ const employerSchema = new mongoose.Schema(
       }],
       default: []
     },
+    otp:{
+      type: String,
+      default: "",
+    },
+    otpVerified:{
+      type: Boolean,
+      default: false,
+    },
     membershipTier: { type: String, default: "Blue", enum: ["Blue", "Silver", "Gold", "Platinum"] },
     loginStatus: { 
       type: String, 

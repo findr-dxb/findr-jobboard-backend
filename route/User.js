@@ -3,6 +3,8 @@ const router = express.Router();
 const {
   signup,
   login,
+  verifyOTP,
+  resendOTP,
   updateProfile,
   getUserProfileDetails,
   checkProfileEligibility,
@@ -27,6 +29,8 @@ const {
 // Auth routes
 router.post("/signup", signup);
 router.post("/login", login);
+router.post("/verify-otp", verifyOTP);
+router.post("/resend-otp", resendOTP);
 
 // Password reset routes
 router.post("/auth/forgot-password", forgotPassword);

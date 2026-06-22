@@ -44,6 +44,14 @@ const findrUserSchema = new mongoose.Schema(
       trim: true,
       required: true,
     },
+    otp:{
+      type: String,
+      default: "",
+    },
+    otpVerified:{
+      type: Boolean,
+      default: false,
+    },
 
     // Basic Profile
     profilePicture: {

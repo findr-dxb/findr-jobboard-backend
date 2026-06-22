@@ -30,15 +30,22 @@ exports.signup = async (req, res) => {
       });
     }
 
+    const Model = role === "employer" ? Employer : User;
+
     // Check if user already exists in either collection
     const existingUser = role === "employer" 
       ? await Employer.findOne({ email })
       : await User.findOne({ email });
 
     if (existingUser) {
-      return res.status(400).json({ 
-        message: "Account with this email already exists" 
-      });
+      if (existingUser.otpVerified) {
+        return res.status(400).json({ 
+          message: "Account with this email already exists" 
+        });
+      } else {
+        // Delete the unverified user to prevent unique key index errors
+        await Model.deleteOne({ _id: existingUser._id });
+      }
     }
 
     // Handle referral code if provided
@@ -51,138 +58,29 @@ exports.signup = async (req, res) => {
       
       if (referringUser) {
         referredBy = referringUser._id;
-      } else {
-        // Referral code is invalid, but we'll still create the account
-        // You can choose to return an error here if you want strict validation
       }
     }
 
     // Create new user based on role
-    const Model = role === "employer" ? Employer : User;
     const userName = otherData.name || otherData.fullName || email.split('@')[0];
-    
-    // Generate referral code for new user
-    const newUserReferralCode = generateReferralCode(userName);
-    
+    const newUserReferralCode = generateReferralCode(userName); 
+    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+
     const userData = {
       email,
       password,
       role,
       name: userName,
-      referralCode: newUserReferralCode, // Add referral code explicitly during signup
-      ...(referredBy && { referredBy }), // Add referredBy if referral code was valid
+      referralCode: newUserReferralCode, 
+      otp,
+      otpVerified: false,
+      ...(referredBy && { referredBy }), 
       ...(role === "employer" ? otherData : { ...otherData, fullName: otherData.name })
     };
     let newUser = new Model(userData);
 
     await newUser.save();
 
-    // Award multiplied points to referrer if someone signed up using their referral code
-    if (referredBy) {
-      try {
-        // Fetch referrer's profile to calculate their tier multiplier
-        const referrer = await User.findById(referredBy);
-        
-        if (!referrer) {
-          console.error('[ReferralSignupPoints] Referrer not found:', referredBy);
-          return;
-        }
-
-        const referrerCompletion = calculateJobseekerProfileCompletion(referrer);
-
-        // Helper functions for tier multiplier calculation
-        const getExperienceLevel = (yearsExp) => {
-          if (yearsExp < 3) return 'Blue';
-          else if (yearsExp >= 3 && yearsExp < 10) return 'Silver';
-          else return 'Gold'; // 10+ years
-        };
-
-        const getTierMultiplier = (tier, experienceLevel) => {
-          const A = 1.0;
-          if (tier === 'Platinum') {
-            if (experienceLevel === 'Blue') return 2.0;
-            else if (experienceLevel === 'Silver') return 3.0;
-            else return 4.0;
-          } else if (tier === 'Gold') return 2.0 * A;
-          else if (tier === 'Silver') return 1.5 * A;
-          else return 1.0 * A;
-        };
-
-        const determineUserTier = (basePoints, yearsExp, isEmirati) => {
-          if (isEmirati) return "Platinum";
-          else if (yearsExp >= 10) return "Gold";
-          else if (yearsExp >= 3 && yearsExp < 10) return "Silver";
-          else return "Blue";
-        };
-
-        // Calculate referrer's base points and tier
-        const percentage = referrerCompletion.percentage;
-        const basePoints = referrerCompletion.profilePoints;
-        const yearsExp = referrer?.professionalExperience?.[0]?.yearsOfExperience || 0;
-        const isEmirati = referrer?.nationality?.toLowerCase()?.includes("emirati");
-        const experienceLevel = getExperienceLevel(yearsExp);
-        const tier = determineUserTier(basePoints, yearsExp, isEmirati);
-        
-        // Get tier multiplier
-        const multiplier = getTierMultiplier(tier, experienceLevel);
-        
-        const baseReferralPoints = 100;
-        const multipliedReferralPoints = Math.round(baseReferralPoints * multiplier);
-
-        // Award multiplied points to referrer
-        const updateResult = await User.findByIdAndUpdate(referredBy, {
-          $inc: { 
-            "points": multipliedReferralPoints,
-            "referralRewardPoints": multipliedReferralPoints,
-            "rewards.totalPoints": multipliedReferralPoints,
-            "rewards.referFriend": multipliedReferralPoints
-          }
-        }, { new: true });
-        
-        if (updateResult) {
-          try {
-            const Reward = require("../model/RewardSchema");
-            const rewardTx = new Reward({
-              userId: referredBy,
-              userModel: "FindrUser",
-              rewardType: "referral",
-              points: multipliedReferralPoints,
-              rewardHistory: [{
-                description: `Referral Signup Bonus (Invited user: ${email})`,
-                date: new Date(),
-                points: multipliedReferralPoints
-              }]
-            });
-            await rewardTx.save();
-          } catch (logErr) {
-            console.error("Failed to log referral reward transaction:", logErr);
-          }
-
-          console.log('[ReferralSignupPoints] Successfully awarded multiplied points to referrer for signup:', referredBy, {
-            baseReferralPoints: baseReferralPoints,
-            multiplier: multiplier,
-            tier: tier,
-            experienceLevel: experienceLevel,
-            multipliedReferralPoints: multipliedReferralPoints,
-            newReferralRewardPoints: updateResult.referralRewardPoints,
-            newReferFriendPoints: updateResult.rewards?.referFriend,
-            newPoints: updateResult.points,
-            newUserEmail: email
-          });
-        } else {
-          console.error('[ReferralSignupPoints] User not found for referrer ID:', referredBy);
-        }
-      } catch (referralErr) {
-        console.error('[ReferralSignupPoints] Failed to award referral signup points:', {
-          error: referralErr.message,
-          stack: referralErr.stack,
-          referrerId: referredBy,
-          newUserEmail: email
-        });
-      }
-    }
-
-    
     if (role === "jobseeker") {
       const completion = calculateJobseekerProfileCompletion(newUser);
       const calculatedPoints = completion.profilePoints;
@@ -192,46 +90,26 @@ exports.signup = async (req, res) => {
       newUser.rewards.completeProfile = calculatedPoints;
       newUser.profileCompleted = completion.percentage.toString();
       await newUser.save();
-
-      newUser = await Model.findById(newUser._id);
     }
 
-    const token = jwt.sign(
-      { 
-        id: newUser._id,
-        role: newUser.role 
-      }, 
-      process.env.JWT_SECRET,
-      { expiresIn: "1d" }
-    );
-
-   
-    const userProfile = newUser.getPublicProfile();
-
-    res.status(201).json({
-      message: "Registration successful",
-      user: {
-        ...userProfile,
-        points: role === "jobseeker" ? userProfile.rewards?.totalPoints || 0 : undefined,
-        profileCompletion: role === "jobseeker" ? userProfile.rewards?.completeProfile || 0 : undefined,
-      },
-      token
-    });
-
+    // Send OTP email in the background
     setImmediate(async () => {
       try {
-        const { sendWelcomeEmail } = require('../welcomeMail');
-        const userName = role === "jobseeker" 
-          ? (newUser.fullName || newUser.name || 'User')
-          : (newUser.name || newUser.companyName || 'User');
-        
-        const emailResult = await sendWelcomeEmail(email, userName, role);
+        const { sendOtpEmail } = require('../utils/sendOtpEmail');
+        const emailResult = await sendOtpEmail(email, userName, otp);
         if (!emailResult.success) {
-          console.error('Welcome email failed:', emailResult.error);
+          console.error('OTP sending failed:', emailResult.error);
         }
       } catch (err) {
-        console.error('Welcome email error:', err.message);
+        console.error('OTP sending error:', err.message);
       }
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Verification code sent to your email",
+      email: email,
+      role: role
     });
 
   } catch (error) {
@@ -246,12 +124,6 @@ exports.login = async (req, res) => {
   try {
     const { email, password, role } = req.body;
     
-    if (role !== "jobseeker" && role !== "employer") {
-      return res.status(400).json({ 
-        message: "Role must be either 'jobseeker' or 'employer'" 
-      });
-    }
-
     if (role !== "jobseeker" && role !== "employer") {
       return res.status(400).json({ 
         message: "Role must be either 'jobseeker' or 'employer'" 
@@ -280,6 +152,30 @@ exports.login = async (req, res) => {
     if (user.password !== password) {
       return res.status(401).json({ 
         message: "Invalid credentials" 
+      });
+    }
+
+    // Check if email is verified
+    if (user.otpVerified === false) {
+      // Re-generate OTP and resend it
+      const otp = Math.floor(1000 + Math.random() * 9000).toString();
+      user.otp = otp;
+      await user.save();
+
+      setImmediate(async () => {
+        try {
+          const { sendOtpEmail } = require('../utils/sendOtpEmail');
+          await sendOtpEmail(user.email, user.name || 'User', otp);
+        } catch (err) {
+          console.error('OTP sending error on login redirect:', err.message);
+        }
+      });
+
+      return res.status(403).json({ 
+        message: "Please verify your email before logging in. A new OTP has been sent.",
+        unverified: true,
+        email: user.email,
+        role: user.role
       });
     }
 
@@ -1715,6 +1611,238 @@ exports.getMyNetwork = async (req, res) => {
       success: false,
       message: "Failed to fetch network",
       error: error.message,
+    });
+  }
+};
+
+exports.verifyOTP = async (req, res) => {
+  try {
+    const { email, otp, role } = req.body;
+
+    if (!email || !otp || !role) {
+      return res.status(400).json({
+        message: "Email, OTP and role are required."
+      });
+    }
+
+    if (role !== "jobseeker" && role !== "employer") {
+      return res.status(400).json({
+        message: "Role must be either 'jobseeker' or 'employer'"
+      });
+    }
+
+    const Model = role === "employer" ? Employer : User;
+    const user = await Model.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found."
+      });
+    }
+
+    if (user.otpVerified) {
+      return res.status(400).json({
+        message: "Account is already verified."
+      });
+    }
+
+    if (user.otp !== otp) {
+      return res.status(400).json({
+        message: "Invalid verification code."
+      });
+    }
+
+    // Set verified
+    user.otpVerified = true;
+    user.otp = "";
+    await user.save();
+
+    // Award referral rewards if referredBy exists
+    if (user.referredBy) {
+      try {
+        const referrer = await User.findById(user.referredBy);
+        if (referrer) {
+          const referrerCompletion = calculateJobseekerProfileCompletion(referrer);
+
+          const getExperienceLevel = (yearsExp) => {
+            if (yearsExp < 3) return 'Blue';
+            else if (yearsExp >= 3 && yearsExp < 10) return 'Silver';
+            else return 'Gold';
+          };
+
+          const getTierMultiplier = (tier, experienceLevel) => {
+            const A = 1.0;
+            if (tier === 'Platinum') {
+              if (experienceLevel === 'Blue') return 2.0;
+              else if (experienceLevel === 'Silver') return 3.0;
+              else return 4.0;
+            } else if (tier === 'Gold') return 2.0 * A;
+            else if (tier === 'Silver') return 1.5 * A;
+            else return 1.0 * A;
+          };
+
+          const determineUserTier = (basePoints, yearsExp, isEmirati) => {
+            if (isEmirati) return "Platinum";
+            else if (yearsExp >= 10) return "Gold";
+            else if (yearsExp >= 3 && yearsExp < 10) return "Silver";
+            else return "Blue";
+          };
+
+          const percentage = referrerCompletion.percentage;
+          const basePoints = referrerCompletion.profilePoints;
+          const yearsExp = referrer?.professionalExperience?.[0]?.yearsOfExperience || 0;
+          const isEmirati = referrer?.nationality?.toLowerCase()?.includes("emirati");
+          const experienceLevel = getExperienceLevel(yearsExp);
+          const tier = determineUserTier(basePoints, yearsExp, isEmirati);
+          
+          const multiplier = getTierMultiplier(tier, experienceLevel);
+          const baseReferralPoints = 100;
+          const multipliedReferralPoints = Math.round(baseReferralPoints * multiplier);
+
+          const updateResult = await User.findByIdAndUpdate(user.referredBy, {
+            $inc: { 
+              "points": multipliedReferralPoints,
+              "referralRewardPoints": multipliedReferralPoints,
+              "rewards.totalPoints": multipliedReferralPoints,
+              "rewards.referFriend": multipliedReferralPoints
+            }
+          }, { new: true });
+
+          if (updateResult) {
+            const Reward = require("../model/RewardSchema");
+            const rewardTx = new Reward({
+              userId: user.referredBy,
+              userModel: "FindrUser",
+              rewardType: "referral",
+              points: multipliedReferralPoints,
+              rewardHistory: [{
+                description: `Referral Signup Bonus (Invited user: ${email})`,
+                date: new Date(),
+                points: multipliedReferralPoints
+              }]
+            });
+            await rewardTx.save();
+
+            console.log('[ReferralSignupPoints] Successfully awarded referral points on verification:', user.referredBy, {
+              points: multipliedReferralPoints,
+              newUserEmail: email
+            });
+          }
+        }
+      } catch (referralErr) {
+        console.error('[ReferralSignupPoints] Failed to award referral points on verification:', referralErr);
+      }
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { 
+        id: user._id,
+        role: user.role 
+      }, 
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
+
+    const userProfile = user.getPublicProfile();
+    const name = userProfile.name || userProfile.fullName || email.split('@')[0];
+
+    // Send Welcome Email asynchronously
+    setImmediate(async () => {
+      try {
+        const { sendWelcomeEmail } = require('../welcomeMail');
+        const welcomeName = role === "jobseeker" 
+          ? (user.fullName || user.name || 'User')
+          : (user.name || user.companyName || 'User');
+        await sendWelcomeEmail(email, welcomeName, role);
+      } catch (err) {
+        console.error('Welcome email sending failed after verification:', err.message);
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Email verified successfully.",
+      user: {
+        ...userProfile,
+        name,
+        points: role === "jobseeker" ? userProfile.rewards?.totalPoints || 0 : undefined,
+        profileCompletion: role === "jobseeker" ? userProfile.rewards?.completeProfile || 0 : undefined,
+      },
+      token
+    });
+
+  } catch (error) {
+    console.error("verifyOTP error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "OTP verification failed.",
+      error: error.message
+    });
+  }
+};
+
+exports.resendOTP = async (req, res) => {
+  try {
+    const { email, role } = req.body;
+
+    if (!email || !role) {
+      return res.status(400).json({
+        message: "Email and role are required."
+      });
+    }
+
+    if (role !== "jobseeker" && role !== "employer") {
+      return res.status(400).json({
+        message: "Role must be either 'jobseeker' or 'employer'"
+      });
+    }
+
+    const Model = role === "employer" ? Employer : User;
+    const user = await Model.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found."
+      });
+    }
+
+    if (user.otpVerified) {
+      return res.status(400).json({
+        message: "Account is already verified."
+      });
+    }
+
+    // Generate new OTP code
+    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+    user.otp = otp;
+    await user.save();
+
+    // Send OTP email in the background
+    setImmediate(async () => {
+      try {
+        const { sendOtpEmail } = require('../utils/sendOtpEmail');
+        const userName = user.name || user.fullName || email.split('@')[0];
+        const emailResult = await sendOtpEmail(email, userName, otp);
+        if (!emailResult.success) {
+          console.error('OTP sending failed on resend:', emailResult.error);
+        }
+      } catch (err) {
+        console.error('OTP sending error on resend:', err.message);
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Verification code resent successfully."
+    });
+
+  } catch (error) {
+    console.error("resendOTP error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to resend verification code.",
+      error: error.message
     });
   }
 };

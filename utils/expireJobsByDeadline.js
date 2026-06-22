@@ -14,10 +14,14 @@ function utcStartOfDay(d = new Date()) {
  */
 async function expireJobsPastApplicationDeadline() {
   const todayStart = utcStartOfDay(new Date());
+  const now = new Date();
   const result = await Job.updateMany(
     {
       status: "active",
-      applicationDeadline: { $lt: todayStart },
+      $or: [
+        { applicationDeadline: { $lt: todayStart } },
+        { expiredDate: { $lte: now } }
+      ]
     },
     { $set: { status: "expired" } }
   );
