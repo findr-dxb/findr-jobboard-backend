@@ -92,9 +92,9 @@ exports.signup = async (req, res) => {
 
         // Helper functions for tier multiplier calculation
         const getExperienceLevel = (yearsExp) => {
-          if (yearsExp <= 1) return 'Blue';
-          else if (yearsExp >= 2 && yearsExp <= 5) return 'Silver';
-          else return 'Gold'; // 5+ years
+          if (yearsExp < 3) return 'Blue';
+          else if (yearsExp >= 3 && yearsExp < 10) return 'Silver';
+          else return 'Gold'; // 10+ years
         };
 
         const getTierMultiplier = (tier, experienceLevel) => {
@@ -110,9 +110,8 @@ exports.signup = async (req, res) => {
 
         const determineUserTier = (basePoints, yearsExp, isEmirati) => {
           if (isEmirati) return "Platinum";
-          else if (basePoints >= 500) return "Platinum";
-          else if (yearsExp >= 5) return "Gold";
-          else if (yearsExp >= 2 && yearsExp <= 5) return "Silver";
+          else if (yearsExp >= 10) return "Gold";
+          else if (yearsExp >= 3 && yearsExp < 10) return "Silver";
           else return "Blue";
         };
 
@@ -573,7 +572,7 @@ exports.updateProfile = async (req, res) => {
 
     if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'nationality')) {
       const nationalityStr = (req.body.nationality ?? '').toString().trim().toLowerCase();
-      const isEmirati = nationalityStr.includes("emirati") || nationalityStr.includes("uae");
+      const isEmirati = nationalityStr.includes("emirati");
       
       if (!isEmirati && nationalityStr) {
         if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'visaExpiryDate')) {

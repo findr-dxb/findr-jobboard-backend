@@ -8,7 +8,6 @@ const {
   closeJob,
   publishJob,
   getEmployerJobs,
-  getJobRecommendations,
   getJobsForPicker,
 } = require("../controller/JobController");
 const authMiddleware = require("../middleware/auth");
@@ -20,7 +19,7 @@ router.get("/jobs/picker", optionalAuthMiddleware, getJobsForPicker);
 
 // Protected routes (require authentication)
 router.get("/employer/jobs", authMiddleware, getEmployerJobs); // Get employer's own jobs
-router.get("/jobs/recommendations", authMiddleware, getJobRecommendations); // Get job recommendations for user
+
 
 router.get("/jobs/:jobId", optionalAuthMiddleware, getJob); // Get 
 router.post("/create/jobs", authMiddleware, createJob); // Create a new job

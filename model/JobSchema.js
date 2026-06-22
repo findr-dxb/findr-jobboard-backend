@@ -74,6 +74,10 @@ const jobSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Application"
     }],
+    nationality: {
+      type: String,
+      trim: true, 
+    },
     
     // Analytics
     views: {
@@ -93,7 +97,6 @@ jobSchema.virtual('applicationCount').get(function() {
   return this.applications?.length || 0;
 });
 
-// Indexes for search, listings, and employer dashboards
 jobSchema.index({ title: 'text', description: 'text', companyName: 'text' });
 jobSchema.index({ location: 1, jobType: 1, experienceLevel: 1 });
 jobSchema.index({ status: 1, applicationDeadline: 1 });

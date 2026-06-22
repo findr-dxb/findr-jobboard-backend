@@ -1274,8 +1274,8 @@ exports.confirmReferralApplication = async (req, res) => {
         const basePoints = referrerCompletion.profilePoints;
         const yearsExp = referrer.professionalExperience?.[0]?.yearsOfExperience || 0;
         const isEmirati = referrer.nationality?.toLowerCase()?.includes("emirati");
-        const tier = isEmirati || basePoints >= 500 ? "Platinum" : yearsExp >= 5 ? "Gold" : yearsExp >= 2 ? "Silver" : "Blue";
-        const expLevel = yearsExp <= 1 ? "Blue" : yearsExp <= 5 ? "Silver" : "Gold";
+        const tier = isEmirati ? "Platinum" : yearsExp >= 10 ? "Gold" : yearsExp >= 3 ? "Silver" : "Blue";
+        const expLevel = yearsExp < 3 ? "Blue" : yearsExp < 10 ? "Silver" : "Gold";
         const multiplierMap = {
           Platinum: { Blue: 2.0, Silver: 3.0, Gold: 4.0 },
           Gold: { Blue: 2.0, Silver: 2.0, Gold: 2.0 },
