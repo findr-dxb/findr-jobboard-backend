@@ -346,6 +346,7 @@ exports.getEmployerApplications = async (req, res) => {
     const applications = await Application.find(query)
       .populate('jobId', 'title companyName location salary')
       .populate('applicantId', 'name fullName email phoneNumber location dateOfBirth nationality emirateId passportNumber employmentVisa introVideo resumeDocument professionalSummary refersLink referredMember professionalExperience education skills certifications profilePicture membershipTier jobPreferences socialLinks rmService rewards referralRewardPoints applications savedJobs profileCompleted points')
+      .populate('referredBy', 'name fullName email')
       .sort({ appliedDate: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -394,6 +395,7 @@ exports.getJobApplications = async (req, res) => {
       status: { $ne: 'withdrawn' } // Exclude withdrawn applications from employer view
     })
       .populate('applicantDetails', 'name email phone location profilePicture membershipTier professionalSummary')
+      .populate('referredBy', 'name fullName email')
       .sort({ appliedDate: -1 });
 
     res.json({ data: applications });
