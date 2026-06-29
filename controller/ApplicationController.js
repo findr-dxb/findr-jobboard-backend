@@ -412,7 +412,7 @@ exports.getJobApplications = async (req, res) => {
 exports.updateApplicationStatus = async (req, res) => {
   try {
     const { applicationId } = req.params;
-    const { status, notes, interviewDate, interviewMode } = req.body;
+    const { status, notes, interviewDate, interviewMode, hiredJobTitle, hiredLocation, hiredSalary } = req.body;
     const employerId = req.user.id;
 
     // Verify application belongs to employer and populate referredBy for referral points
@@ -430,7 +430,10 @@ exports.updateApplicationStatus = async (req, res) => {
       status, 
       employerNotes: notes || application.employerNotes,
       viewedByEmployer: true,
-      viewedDate: new Date()
+      viewedDate: new Date(),
+      hiredJobTitle: hiredJobTitle || application.hiredJobTitle,
+      hiredLocation: hiredLocation || application.hiredLocation,
+      hiredSalary: hiredSalary || application.hiredSalary,
     };
 
     // Add interview-specific fields if status is interview_scheduled

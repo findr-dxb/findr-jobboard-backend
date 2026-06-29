@@ -76,6 +76,19 @@ const applicationSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // Hired details (negotiated/final terms)
+    hiredJobTitle: {
+      type: String,
+      default: "",
+    },
+    hiredLocation: {
+      type: String,
+      default: "",
+    },
+    hiredSalary: {
+      type: String,
+      default: "",
+    },
     rating: {
       type: Number,
       min: 0,

@@ -387,20 +387,10 @@ exports.getJob = async (req, res) => {
       return res.status(404).json({ message: "Job not found" });
     }
 
-    // Increment view count only if viewer is not the job owner and job is active
-    // This ensures employers don't inflate their own job view counts
-    console.log(
-      "Job View - ViewerId:",
-      viewerId,
-      "Job Owner:",
-      ownerId,
-      "Is Owner:",
-      isOwner,
-    );
 
     if (!isOwner && job.status === "active") {
+      await Job.findByIdAndUpdate(jobId, { $inc: { views: 1 } });
       job.views = (job.views || 0) + 1;
-      await job.save();
       console.log("View count incremented to:", job.views);
     } else {
       console.log(
