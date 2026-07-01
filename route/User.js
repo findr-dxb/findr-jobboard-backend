@@ -19,6 +19,7 @@ const {
   requestProfileAccess,
   confirmProfileAccess,
   getMyNetwork,
+  getFindrStars,
 } = require("../controller/Auth");
 const authMiddleware = require("../middleware/auth");
 const {
@@ -31,6 +32,7 @@ router.post("/signup", signup);
 router.post("/login", login);
 router.post("/verify-otp", verifyOTP);
 router.post("/resend-otp", resendOTP);
+router.get("/stars", getFindrStars);
 
 // Password reset routes
 router.post("/auth/forgot-password", forgotPassword);

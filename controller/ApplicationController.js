@@ -746,7 +746,7 @@ exports.getEmployerDashboard = async (req, res) => {
 exports.getUserApplications = async (req, res) => {
   try {
     const applicantId = req.user.id;
-    const { status, page = 1, limit = 20 } = req.query;
+    const { status, page = 1, limit = 10 } = req.query;
 
     console.log('getUserApplications - applicantId:', applicantId);
     console.log('getUserApplications - query params:', { status, page, limit });

@@ -240,6 +240,7 @@ employerSchema.index({ loginStatus: 1 });
 employerSchema.index({ verificationStatus: 1 });
 employerSchema.index({ createdAt: -1 });
 employerSchema.index({ referredBy: 1, createdAt: -1 });
+employerSchema.index({ resetPasswordToken: 1, resetPasswordExpiry: 1 });
 
 employerSchema.pre('save', async function (next) {
   if (this.isNew && (!this.referralCode || this.referralCode === '')) {
@@ -268,14 +269,6 @@ employerSchema.methods.getPublicProfile = function () {
   delete employerObject.password;
   return employerObject;
 };
-
-// Indexes (email unique index is created by schema `unique: true`)
-employerSchema.index({ referralCode: 1 });
-employerSchema.index({ referredBy: 1 });
-employerSchema.index({ loginStatus: 1 });
-employerSchema.index({ verificationStatus: 1 });
-employerSchema.index({ createdAt: -1 });
-employerSchema.index({ resetPasswordToken: 1, resetPasswordExpiry: 1 });
 
 const Employer = mongoose.model("Employer", employerSchema);
 module.exports = Employer;

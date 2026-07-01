@@ -1847,3 +1847,77 @@ exports.resendOTP = async (req, res) => {
   }
 };
 
+exports.getFindrStars = async (req, res) => {
+  try {
+    const topJobseekers = await User.find({ role: "jobseeker" })
+      .sort({ points: -1, createdAt: -1 })
+      .limit(4)
+      .select("name fullName profilePicture points profileCompleted applications")
+      .lean();
+
+    const topEmployers = await Employer.find({})
+      .sort({ points: -1, createdAt: -1 })
+      .limit(4)
+      .select("name companyName companyLogo profilePhoto points postedJobs verificationStatus")
+      .lean();
+
+    const jobseekers = topJobseekers.map(js => {
+      let message = "Active jobseeker engaging with opportunities on Findr.";
+      const completion = parseInt(js.profileCompleted || "0");
+      const totalApps = js.applications?.totalApplications || 0;
+      
+      if (completion >= 80) {
+        message = `Outstanding candidate with ${completion}% profile completion and platform activity!`;
+      } else if (totalApps > 0) {
+        message = `Highly active jobseeker with ${totalApps} applications submitted!`;
+      } else if (js.points > 100) {
+        message = `Active candidate with ${js.points} points earned from platform participation.`;
+      }
+      
+      return {
+        id: js._id,
+        name: js.fullName || js.name || "Findr Seeker",
+        profilePicture: js.profilePicture || "",
+        points: js.points || 0,
+        appreciationMessage: message
+      };
+    });
+
+    const employers = topEmployers.map(emp => {
+      let message = "Employer actively reviewing candidates and hiring on Findr.";
+      const jobCount = emp.postedJobs?.length || 0;
+      
+      if (jobCount > 0) {
+        message = `Hiring partner with ${jobCount} active job listings.`;
+      } else if (emp.verificationStatus === "verified") {
+        message = "Verified partner providing top opportunities in the region.";
+      } else if (emp.points > 100) {
+        message = `Active employer with ${emp.points} points earned from platform engagement.`;
+      }
+      
+      return {
+        id: emp._id,
+        name: emp.companyName || emp.name || "Findr Partner",
+        profilePicture: emp.companyLogo || emp.profilePhoto || "",
+        points: emp.points || 0,
+        appreciationMessage: message
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        jobseekers,
+        employers
+      }
+    });
+  } catch (error) {
+    console.error("Error in getFindrStars:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch Findr Stars",
+      error: error.message
+    });
+  }
+};
+
