@@ -1490,3 +1490,172 @@ exports.getGrievance = async (req, res) => {
     });
   }
 };
+
+// Admin Findr Stars Controllers
+const FindrStar = require("../model/FindrStarSchema");
+const mongoose = require("mongoose");
+
+const getFindrStarsList = async (type) => {
+  const customStars = await FindrStar.find({ type }).sort({ createdAt: -1 }).lean();
+  
+  const featuredUserIds = new Set();
+  customStars.forEach(star => {
+    if (star.userId) featuredUserIds.add(star.userId.toString());
+  });
+
+  const finalStars = customStars.map(star => ({
+    _id: star._id,
+    name: star.name,
+    type: star.type,
+    profilePicture: star.profilePicture || "",
+    points: star.points || 0,
+    appreciationMessage: star.appreciationMessage,
+    userId: star.userId || null,
+    isSystemGenerated: false,
+    createdAt: star.createdAt
+  }));
+
+  if (finalStars.length < 4) {
+    const limit = 4 - finalStars.length;
+    if (type === 'jobseeker') {
+      const topJobseekers = await FindrUser.find({ 
+        role: "jobseeker",
+        _id: { $nin: Array.from(featuredUserIds).map(id => new mongoose.Types.ObjectId(id)) }
+      })
+        .sort({ points: -1, createdAt: -1 })
+        .limit(limit)
+        .select("name fullName profilePicture points profileCompleted applications createdAt")
+        .lean();
+
+      topJobseekers.forEach(js => {
+        let message = "Active jobseeker engaging with opportunities on Findr.";
+        const completion = parseInt(js.profileCompleted || "0");
+        const totalApps = js.applications?.totalApplications || 0;
+        
+        if (completion >= 80) {
+          message = `Outstanding candidate with ${completion}% profile completion and platform activity!`;
+        } else if (totalApps > 0) {
+          message = `Highly active jobseeker with ${totalApps} applications submitted!`;
+        } else if (js.points > 100) {
+          message = `Active candidate with ${js.points} points earned from platform participation.`;
+        }
+
+        finalStars.push({
+          _id: js._id,
+          name: js.fullName || js.name || "Findr Seeker",
+          type: 'jobseeker',
+          profilePicture: js.profilePicture || "",
+          points: js.points || 0,
+          appreciationMessage: message,
+          userId: js._id,
+          isSystemGenerated: true,
+          createdAt: js.createdAt
+        });
+      });
+    } else {
+      const topEmployers = await Employer.find({
+        _id: { $nin: Array.from(featuredUserIds).map(id => new mongoose.Types.ObjectId(id)) }
+      })
+        .sort({ points: -1, createdAt: -1 })
+        .limit(limit)
+        .select("name companyName companyLogo profilePhoto points postedJobs verificationStatus createdAt")
+        .lean();
+
+      topEmployers.forEach(emp => {
+        let message = "Employer actively reviewing candidates and hiring on Findr.";
+        const jobCount = emp.postedJobs?.length || 0;
+        
+        if (jobCount > 0) {
+          message = `Hiring partner with ${jobCount} active job listings.`;
+        } else if (emp.verificationStatus === "verified") {
+          message = "Verified partner providing top opportunities in the region.";
+        } else if (emp.points > 100) {
+          message = `Active employer with ${emp.points} points earned from platform engagement.`;
+        }
+
+        finalStars.push({
+          _id: emp._id,
+          name: emp.companyName || emp.name || "Findr Partner",
+          type: 'employer',
+          profilePicture: emp.companyLogo || emp.profilePhoto || "",
+          points: emp.points || 0,
+          appreciationMessage: message,
+          userId: emp._id,
+          isSystemGenerated: true,
+          createdAt: emp.createdAt
+        });
+      });
+    }
+  }
+
+  return finalStars.slice(0, 4);
+};
+
+exports.getFindrStarsAdmin = async (req, res) => {
+  try {
+    const jobseekers = await getFindrStarsList('jobseeker');
+    const employers = await getFindrStarsList('employer');
+    
+    return res.status(200).json({ 
+      success: true, 
+      data: [...jobseekers, ...employers] 
+    });
+  } catch (error) {
+    console.error("Error fetching Findr Stars for admin:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch Findr Stars" });
+  }
+};
+
+exports.createFindrStarAdmin = async (req, res) => {
+  try {
+    const { name, type, profilePicture, points, appreciationMessage, userId } = req.body;
+    if (!name || !type || !appreciationMessage) {
+      return res.status(400).json({ success: false, message: "Name, type, and appreciation message are required" });
+    }
+    
+    let star;
+    if (userId) {
+      star = await FindrStar.findOneAndUpdate(
+        { userId: new mongoose.Types.ObjectId(userId) },
+        { name, type, profilePicture: profilePicture || "", points: points || 0, appreciationMessage, userId },
+        { new: true, upsert: true }
+      );
+    } else {
+      star = await FindrStar.create({
+        name,
+        type,
+        profilePicture: profilePicture || "",
+        points: points || 0,
+        appreciationMessage
+      });
+    }
+    
+    return res.status(201).json({ success: true, message: "Findr Star saved successfully", data: star });
+  } catch (error) {
+    console.error("Error creating Findr Star:", error);
+    return res.status(500).json({ success: false, message: "Failed to add Findr Star", error: error.message });
+  }
+};
+
+exports.deleteFindrStarAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid ID format" });
+    }
+    
+    let deleted = await FindrStar.findByIdAndDelete(id);
+    if (!deleted) {
+      deleted = await FindrStar.findOneAndDelete({ userId: new mongoose.Types.ObjectId(id) });
+    }
+    
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: "Findr Star override not found" });
+    }
+    return res.status(200).json({ success: true, message: "Findr Star override removed successfully" });
+  } catch (error) {
+    console.error("Error deleting Findr Star:", error);
+    return res.status(500).json({ success: false, message: "Failed to remove Findr Star override" });
+  }
+};

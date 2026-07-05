@@ -490,7 +490,7 @@ exports.updateProfile = async (req, res) => {
 
 
     const updateFields = {
-      ...(fullName && { fullName }),
+      ...(fullName && { fullName, name: fullName }),
       ...(email && { email }),
       ...(phoneNumber && { phoneNumber }),
       ...(location && { location }),
@@ -1849,61 +1849,104 @@ exports.resendOTP = async (req, res) => {
 
 exports.getFindrStars = async (req, res) => {
   try {
-    const topJobseekers = await User.find({ role: "jobseeker" })
-      .sort({ points: -1, createdAt: -1 })
-      .limit(4)
-      .select("name fullName profilePicture points profileCompleted applications")
-      .lean();
+    const FindrStar = require("../model/FindrStarSchema");
+    const mongoose = require("mongoose");
 
-    const topEmployers = await Employer.find({})
-      .sort({ points: -1, createdAt: -1 })
-      .limit(4)
-      .select("name companyName companyLogo profilePhoto points postedJobs verificationStatus")
-      .lean();
-
-    const jobseekers = topJobseekers.map(js => {
-      let message = "Active jobseeker engaging with opportunities on Findr.";
-      const completion = parseInt(js.profileCompleted || "0");
-      const totalApps = js.applications?.totalApplications || 0;
+    const getFindrStarsList = async (type) => {
+      // 1. Get all manually added/customized stars of this type
+      const customStars = await FindrStar.find({ type }).sort({ createdAt: -1 }).lean();
       
-      if (completion >= 80) {
-        message = `Outstanding candidate with ${completion}% profile completion and platform activity!`;
-      } else if (totalApps > 0) {
-        message = `Highly active jobseeker with ${totalApps} applications submitted!`;
-      } else if (js.points > 100) {
-        message = `Active candidate with ${js.points} points earned from platform participation.`;
+      const featuredUserIds = new Set();
+      customStars.forEach(star => {
+        if (star.userId) featuredUserIds.add(star.userId.toString());
+      });
+
+      const finalStars = customStars.map(star => ({
+        id: star._id,
+        name: star.name,
+        profilePicture: star.profilePicture || "",
+        points: star.points || 0,
+        appreciationMessage: star.appreciationMessage,
+        userId: star.userId || null,
+        isSystemGenerated: false
+      }));
+
+      // 2. If we have less than 4 stars, fill the rest with top system-generated ones
+      if (finalStars.length < 4) {
+        const limit = 4 - finalStars.length;
+        if (type === 'jobseeker') {
+          const topJobseekers = await User.find({ 
+            role: "jobseeker",
+            _id: { $nin: Array.from(featuredUserIds).map(id => new mongoose.Types.ObjectId(id)) }
+          })
+            .sort({ points: -1, createdAt: -1 })
+            .limit(limit)
+            .select("name fullName profilePicture points profileCompleted applications")
+            .lean();
+
+          topJobseekers.forEach(js => {
+            let message = "Active jobseeker engaging with opportunities on Findr.";
+            const completion = parseInt(js.profileCompleted || "0");
+            const totalApps = js.applications?.totalApplications || 0;
+            
+            if (completion >= 80) {
+              message = `Outstanding candidate with ${completion}% profile completion and platform activity!`;
+            } else if (totalApps > 0) {
+              message = `Highly active jobseeker with ${totalApps} applications submitted!`;
+            } else if (js.points > 100) {
+              message = `Active candidate with ${js.points} points earned from platform participation.`;
+            }
+
+            finalStars.push({
+              id: js._id,
+              name: js.fullName || js.name || "Findr Seeker",
+              profilePicture: js.profilePicture || "",
+              points: js.points || 0,
+              appreciationMessage: message,
+              userId: js._id,
+              isSystemGenerated: true
+            });
+          });
+        } else {
+          const topEmployers = await Employer.find({
+            _id: { $nin: Array.from(featuredUserIds).map(id => new mongoose.Types.ObjectId(id)) }
+          })
+            .sort({ points: -1, createdAt: -1 })
+            .limit(limit)
+            .select("name companyName companyLogo profilePhoto points postedJobs verificationStatus")
+            .lean();
+
+          topEmployers.forEach(emp => {
+            let message = "Employer actively reviewing candidates and hiring on Findr.";
+            const jobCount = emp.postedJobs?.length || 0;
+            
+            if (jobCount > 0) {
+              message = `Hiring partner with ${jobCount} active job listings.`;
+            } else if (emp.verificationStatus === "verified") {
+              message = "Verified partner providing top opportunities in the region.";
+            } else if (emp.points > 100) {
+              message = `Active employer with ${emp.points} points earned from platform engagement.`;
+            }
+
+            finalStars.push({
+              id: emp._id,
+              name: emp.companyName || emp.name || "Findr Partner",
+              profilePicture: emp.companyLogo || emp.profilePhoto || "",
+              points: emp.points || 0,
+              appreciationMessage: message,
+              userId: emp._id,
+              isSystemGenerated: true
+            });
+          });
+        }
       }
-      
-      return {
-        id: js._id,
-        name: js.fullName || js.name || "Findr Seeker",
-        profilePicture: js.profilePicture || "",
-        points: js.points || 0,
-        appreciationMessage: message
-      };
-    });
 
-    const employers = topEmployers.map(emp => {
-      let message = "Employer actively reviewing candidates and hiring on Findr.";
-      const jobCount = emp.postedJobs?.length || 0;
-      
-      if (jobCount > 0) {
-        message = `Hiring partner with ${jobCount} active job listings.`;
-      } else if (emp.verificationStatus === "verified") {
-        message = "Verified partner providing top opportunities in the region.";
-      } else if (emp.points > 100) {
-        message = `Active employer with ${emp.points} points earned from platform engagement.`;
-      }
-      
-      return {
-        id: emp._id,
-        name: emp.companyName || emp.name || "Findr Partner",
-        profilePicture: emp.companyLogo || emp.profilePhoto || "",
-        points: emp.points || 0,
-        appreciationMessage: message
-      };
-    });
+      return finalStars.slice(0, 4);
+    };
 
+    const jobseekers = await getFindrStarsList('jobseeker');
+    const employers = await getFindrStarsList('employer');
+    
     return res.status(200).json({
       success: true,
       data: {

@@ -22,7 +22,10 @@ const {
   getServices,
   updateService,
   getGrievances,
-  getGrievance
+  getGrievance,
+  getFindrStarsAdmin,
+  createFindrStarAdmin,
+  deleteFindrStarAdmin
 } = require("../controller/AdminController");
 
 // Create Admin Account
@@ -90,5 +93,10 @@ router.get("/admin/grievances", getGrievances);
 
 // Admin Get Grievance by ID
 router.get("/admin/grievances/:id", getGrievance);
+
+// Admin Findr Stars Management
+router.get("/admin/stars", getFindrStarsAdmin);
+router.post("/admin/stars", createFindrStarAdmin);
+router.delete("/admin/stars/:id", deleteFindrStarAdmin);
 
 module.exports = router;
