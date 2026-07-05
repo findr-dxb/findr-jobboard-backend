@@ -1525,15 +1525,22 @@ exports.getMyNetwork = async (req, res) => {
     const invitedIds = new Set(invitedFiltered.map((inv) => inv.id));
 
     const grantedRequests = await ProfileAccessRequest.find({
-      requesterId: userId,
+      $or: [
+        { requesterId: userId },
+        { targetUserId: userId }
+      ],
       status: "granted",
-    }).select("targetUserId targetType").lean();
+    }).select("requesterId targetUserId targetType").lean();
 
     const searchedPromises = grantedRequests.map(async (gr) => {
-      let user = await User.findById(gr.targetUserId).select(jobseekerSelect).lean();
+      const otherUserId = gr.requesterId.toString() === userId.toString()
+        ? gr.targetUserId
+        : gr.requesterId;
+
+      let user = await User.findById(otherUserId).select(jobseekerSelect).lean();
       let role = "jobseeker";
       if (!user) {
-        user = await Employer.findById(gr.targetUserId)
+        user = await Employer.findById(otherUserId)
           .select("companyName name email role companyLocation city country")
           .lean();
         role = "employer";
@@ -1544,7 +1551,7 @@ exports.getMyNetwork = async (req, res) => {
           ? jobseekerNetworkProfileFields(user)
           : employerNetworkProfileFields(user);
       return {
-        id:     gr.targetUserId.toString(),
+        id:     otherUserId.toString(),
         name:   user.fullName || user.companyName || user.name || (user.email ? user.email.split("@")[0] : "User"),
         role,
         type:   "searched",
