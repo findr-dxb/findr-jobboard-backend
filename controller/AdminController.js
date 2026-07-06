@@ -1503,17 +1503,53 @@ const getFindrStarsList = async (type) => {
     if (star.userId) featuredUserIds.add(star.userId.toString());
   });
 
-  const finalStars = customStars.map(star => ({
-    _id: star._id,
-    name: star.name,
-    type: star.type,
-    profilePicture: star.profilePicture || "",
-    points: star.points || 0,
-    appreciationMessage: star.appreciationMessage,
-    userId: star.userId || null,
-    isSystemGenerated: false,
-    createdAt: star.createdAt
-  }));
+  const userIds = customStars.map(s => s.userId).filter(Boolean);
+  let usersMap = new Map();
+  if (userIds.length > 0) {
+    if (type === 'jobseeker') {
+      const users = await FindrUser.find({ _id: { $in: userIds } })
+        .select("name fullName profilePicture points")
+        .lean();
+      users.forEach(u => usersMap.set(u._id.toString(), u));
+    } else {
+      const employers = await Employer.find({ _id: { $in: userIds } })
+        .select("name companyName companyLogo profilePhoto points")
+        .lean();
+      employers.forEach(e => usersMap.set(e._id.toString(), e));
+    }
+  }
+
+  const finalStars = customStars.map(star => {
+    let name = star.name;
+    let profilePicture = star.profilePicture || "";
+    let points = star.points || 0;
+
+    if (star.userId) {
+      const userObj = usersMap.get(star.userId.toString());
+      if (userObj) {
+        if (type === 'jobseeker') {
+          name = userObj.fullName || userObj.name || name;
+          profilePicture = userObj.profilePicture || profilePicture;
+        } else {
+          name = userObj.companyName || userObj.name || name;
+          profilePicture = userObj.companyLogo || userObj.profilePhoto || profilePicture;
+        }
+        points = userObj.points !== undefined ? userObj.points : points;
+      }
+    }
+
+    return {
+      _id: star._id,
+      name,
+      type: star.type,
+      profilePicture,
+      points,
+      appreciationMessage: star.appreciationMessage,
+      userId: star.userId || null,
+      isSystemGenerated: false,
+      createdAt: star.createdAt
+    };
+  });
 
   if (finalStars.length < 4) {
     const limit = 4 - finalStars.length;

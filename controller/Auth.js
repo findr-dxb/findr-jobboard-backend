@@ -1868,15 +1868,51 @@ exports.getFindrStars = async (req, res) => {
         if (star.userId) featuredUserIds.add(star.userId.toString());
       });
 
-      const finalStars = customStars.map(star => ({
-        id: star._id,
-        name: star.name,
-        profilePicture: star.profilePicture || "",
-        points: star.points || 0,
-        appreciationMessage: star.appreciationMessage,
-        userId: star.userId || null,
-        isSystemGenerated: false
-      }));
+      const userIds = customStars.map(s => s.userId).filter(Boolean);
+      let usersMap = new Map();
+      if (userIds.length > 0) {
+        if (type === 'jobseeker') {
+          const users = await User.find({ _id: { $in: userIds } })
+            .select("name fullName profilePicture points")
+            .lean();
+          users.forEach(u => usersMap.set(u._id.toString(), u));
+        } else {
+          const employers = await Employer.find({ _id: { $in: userIds } })
+            .select("name companyName companyLogo profilePhoto points")
+            .lean();
+          employers.forEach(e => usersMap.set(e._id.toString(), e));
+        }
+      }
+
+      const finalStars = customStars.map(star => {
+        let name = star.name;
+        let profilePicture = star.profilePicture || "";
+        let points = star.points || 0;
+
+        if (star.userId) {
+          const userObj = usersMap.get(star.userId.toString());
+          if (userObj) {
+            if (type === 'jobseeker') {
+              name = userObj.fullName || userObj.name || name;
+              profilePicture = userObj.profilePicture || profilePicture;
+            } else {
+              name = userObj.companyName || userObj.name || name;
+              profilePicture = userObj.companyLogo || userObj.profilePhoto || profilePicture;
+            }
+            points = userObj.points !== undefined ? userObj.points : points;
+          }
+        }
+
+        return {
+          id: star._id,
+          name,
+          profilePicture,
+          points,
+          appreciationMessage: star.appreciationMessage,
+          userId: star.userId || null,
+          isSystemGenerated: false
+        };
+      });
 
       // 2. If we have less than 4 stars, fill the rest with top system-generated ones
       if (finalStars.length < 4) {
