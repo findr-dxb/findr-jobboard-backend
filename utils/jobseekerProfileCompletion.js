@@ -166,12 +166,70 @@ function calculateJobseekerProfileCompletion(user) {
   const rounded = Math.min(Math.round(percentage), 100);
   const resume = hasResume(user);
 
+  // Points calculation based on completed fields
+  let points = 0; // Start points from 0 (no base points)
+
+  // Personal Information (Hardcoded points as requested)
+  if (isFilled(user.fullName || user.name)) points += 5;
+  if (isFilled(user.email)) points += 5;
+  if (isFilled(user.phoneNumber)) points += 10;
+  if (isFilled(user.location)) points += 5;
+  if (isFilled(user.dateOfBirth)) points += 5;
+  if (isFilled(user.nationality)) points += 10;
+  if (isFilled(user.emirateId)) points += 10;
+  if (isFilled(user.passportNumber)) points += 10;
+  if (isFilled(user.professionalSummary)) points += 10;
+
+  // Profile Picture (Hardcoded points as requested)
+  if (isFilled(user.profilePicture)) points += 15;
+
+  // Professional Experience (using original equivalent points)
+  if (isFilled(exp.currentRole)) points += 8;
+  if (isFilled(exp.company)) points += 8;
+  if (isFilled(exp.yearsOfExperience)) points += 8;
+  if (isFilled(exp.industry)) points += 8;
+  if (isFilled(user.jobPreferences?.salaryExpectation)) points += 8;
+
+  // Education (using original equivalent points)
+  if (isFilled(edu.highestDegree)) points += 5;
+  if (isFilled(edu.institution)) points += 5;
+  if (isFilled(edu.yearOfGraduation)) points += 5;
+  if (isFilled(edu.gradeCgpa)) points += 5;
+
+  // Resume Upload (using original equivalent points)
+  if (resume) points += 30;
+
+  // Additional documents (using original equivalent points)
+  if (hasAdditionalDocuments(user)) points += 15;
+
+  // Introductory Video (using original equivalent points)
+  if (isFilled(user.introVideo)) points += 10;
+
+  // Social links (using original equivalent points)
+  if (isFilled(social.linkedIn || social.linkedin)) points += 10;
+  if (isFilled(social.instagram)) points += 10;
+  if (isFilled(social.twitterX || social.twitter)) points += 5;
+
+  // Skills & Certifications
+  if (skillsOk) points += 7;
+  const certificationsOk =
+    (Array.isArray(user.certifications) && user.certifications.length > 0) ||
+    (typeof user.certifications === "string" && user.certifications.trim() !== "");
+  if (certificationsOk) points += 6;
+
+  // Job Preferences (using original equivalent points)
+  if (jobTypeOk) points += 4;
+  if (isFilled(prefs.preferredLocation)) points += 4;
+  if (isFilled(prefs.availability)) points += 4;
+
+  const roundedPoints = Math.round(points);
+
   return {
     percentage: rounded,
     missingFields,
     hasResume: resume,
     canApply: rounded >= 80 && resume,
-    profilePoints: 50 + rounded * 2,
+    profilePoints: roundedPoints,
   };
 }
 
