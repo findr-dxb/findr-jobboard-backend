@@ -1527,14 +1527,19 @@ const getFindrStarsList = async (type) => {
     if (star.userId) {
       const userObj = usersMap.get(star.userId.toString());
       if (userObj) {
-        if (type === 'jobseeker') {
-          name = userObj.fullName || userObj.name || name;
-          profilePicture = userObj.profilePicture || profilePicture;
-        } else {
-          name = userObj.companyName || userObj.name || name;
-          profilePicture = userObj.companyLogo || userObj.profilePhoto || profilePicture;
+        const userUpdatedAt = userObj.updatedAt ? new Date(userObj.updatedAt) : new Date(0);
+        const starUpdatedAt = star.updatedAt ? new Date(star.updatedAt) : new Date(0);
+
+        if (userUpdatedAt > starUpdatedAt) {
+          if (type === 'jobseeker') {
+            name = userObj.fullName || userObj.name || name;
+            profilePicture = userObj.profilePicture || profilePicture;
+          } else {
+            name = userObj.companyName || userObj.name || name;
+            profilePicture = userObj.companyLogo || userObj.profilePhoto || profilePicture;
+          }
+          points = userObj.points !== undefined ? userObj.points : points;
         }
-        points = userObj.points !== undefined ? userObj.points : points;
       }
     }
 
@@ -1651,11 +1656,27 @@ exports.createFindrStarAdmin = async (req, res) => {
     
     let star;
     if (userId) {
-      star = await FindrStar.findOneAndUpdate(
-        { userId: new mongoose.Types.ObjectId(userId) },
-        { name, type, profilePicture: profilePicture || "", points: points || 0, appreciationMessage, userId },
-        { new: true, upsert: true }
-      );
+      // 1. Check if userId matches an existing FindrStar document's _id (when editing unlinked custom stars)
+      let existingStarById = null;
+      if (mongoose.Types.ObjectId.isValid(userId)) {
+        existingStarById = await FindrStar.findById(userId);
+      }
+
+      if (existingStarById) {
+        // This is editing an existing custom star (not linked to any user) by its _id
+        star = await FindrStar.findByIdAndUpdate(
+          userId,
+          { name, type, profilePicture: profilePicture || "", points: points || 0, appreciationMessage },
+          { new: true }
+        );
+      } else {
+        // This is a user ID, so we update/upsert by the userId field
+        star = await FindrStar.findOneAndUpdate(
+          { userId: new mongoose.Types.ObjectId(userId) },
+          { name, type, profilePicture: profilePicture || "", points: points || 0, appreciationMessage, userId },
+          { new: true, upsert: true }
+        );
+      }
     } else {
       star = await FindrStar.create({
         name,

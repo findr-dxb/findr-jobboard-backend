@@ -1892,14 +1892,19 @@ exports.getFindrStars = async (req, res) => {
         if (star.userId) {
           const userObj = usersMap.get(star.userId.toString());
           if (userObj) {
-            if (type === 'jobseeker') {
-              name = userObj.fullName || userObj.name || name;
-              profilePicture = userObj.profilePicture || profilePicture;
-            } else {
-              name = userObj.companyName || userObj.name || name;
-              profilePicture = userObj.companyLogo || userObj.profilePhoto || profilePicture;
+            const userUpdatedAt = userObj.updatedAt ? new Date(userObj.updatedAt) : new Date(0);
+            const starUpdatedAt = star.updatedAt ? new Date(star.updatedAt) : new Date(0);
+
+            if (userUpdatedAt > starUpdatedAt) {
+              if (type === 'jobseeker') {
+                name = userObj.fullName || userObj.name || name;
+                profilePicture = userObj.profilePicture || profilePicture;
+              } else {
+                name = userObj.companyName || userObj.name || name;
+                profilePicture = userObj.companyLogo || userObj.profilePhoto || profilePicture;
+              }
+              points = userObj.points !== undefined ? userObj.points : points;
             }
-            points = userObj.points !== undefined ? userObj.points : points;
           }
         }
 
