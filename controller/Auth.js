@@ -1168,11 +1168,13 @@ exports.getReferralJoinerProfile = async (req, res) => {
       type = "employer";
     }
 
-    // 3) If not referred, check if access was granted via profile access request
+    // 3) If not referred, check if access was granted via profile access request in either direction
     if (!referredUser) {
       const granted = await ProfileAccessRequest.findOne({
-        requesterId: userId,
-        targetUserId: id,
+        $or: [
+          { requesterId: userId, targetUserId: id },
+          { requesterId: id, targetUserId: userId }
+        ],
         status: "granted",
       });
       if (granted) {

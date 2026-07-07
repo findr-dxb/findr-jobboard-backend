@@ -141,16 +141,18 @@ exports.createJob = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("createJob:", error);
+    console.error("createJob Error Detail:", error);
 
     if (error.name === "ValidationError") {
       return res.status(400).json({
         message: "Please fill in all required fields before posting your job.",
+        errors: error.errors ? Object.keys(error.errors).map(key => `${key}: ${error.errors[key].message}`) : [error.message]
       });
     }
 
     res.status(500).json({
       message: "We could not post your job right now. Please try again in a few minutes.",
+      error: error.message
     });
   }
 };
