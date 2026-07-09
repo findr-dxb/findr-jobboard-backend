@@ -3,6 +3,11 @@ const Employer = require("../model/EmployerSchema");
 const Job = require("../model/JobSchema");
 const Application = require("../model/ApplicationSchema");
 const EmployerReview = require("../model/EmployerReviewSchema");
+const {
+  syncEmployerJobPostingLimit,
+  getJobPostingStatus,
+  hasJobPostingSlot,
+} = require("../utils/employerJobPosting");
 
 exports.getEmployerProfileDetails = async (req, res) => {
   try {
@@ -693,43 +698,48 @@ exports.checkEmployerEligibility = async (req, res) => {
       });
     }
 
+    await syncEmployerJobPostingLimit(employer);
+    const refreshedEmployer = await Employer.findById(employerId).select('-password');
+
     // Calculate employer profile completion based on required fields
     let completed = 0;
     const totalFields = 20; // Total fields required for employer profile
     const missingFields = [];
 
     // Basic Information (5 fields)
-    if (employer.name) completed++; else missingFields.push("Name");
-    if (employer.email) completed++; else missingFields.push("Email");
-    if (employer.phoneNumber) completed++; else missingFields.push("Phone Number");
-    if (employer.companyName) completed++; else missingFields.push("Company Name");
-    if (employer.companyEmail) completed++; else missingFields.push("Company Email");
+    if (refreshedEmployer.name) completed++; else missingFields.push("Name");
+    if (refreshedEmployer.email) completed++; else missingFields.push("Email");
+    if (refreshedEmployer.phoneNumber) completed++; else missingFields.push("Phone Number");
+    if (refreshedEmployer.companyName) completed++; else missingFields.push("Company Name");
+    if (refreshedEmployer.companyEmail) completed++; else missingFields.push("Company Email");
 
     // Company Information (6 fields)
-    if (employer.industry) completed++; else missingFields.push("Industry");
-    if (employer.teamSize) completed++; else missingFields.push("Team Size");
-    if (employer.foundedYear && employer.foundedYear > 0) completed++; else missingFields.push("Founded Year");
-    if (employer.aboutCompany) completed++; else missingFields.push("About Company");
-    if (employer.companyLogo) completed++; else missingFields.push("Company Logo");
-    if (employer.website) completed++; else missingFields.push("Company Website");
+    if (refreshedEmployer.industry) completed++; else missingFields.push("Industry");
+    if (refreshedEmployer.teamSize) completed++; else missingFields.push("Team Size");
+    if (refreshedEmployer.foundedYear && refreshedEmployer.foundedYear > 0) completed++; else missingFields.push("Founded Year");
+    if (refreshedEmployer.aboutCompany) completed++; else missingFields.push("About Company");
+    if (refreshedEmployer.companyLogo) completed++; else missingFields.push("Company Logo");
+    if (refreshedEmployer.website) completed++; else missingFields.push("Company Website");
 
     // Location Information (3 fields)
-    if (employer.companyLocation) completed++; else missingFields.push("Company Location");
-    if (employer.city) completed++; else missingFields.push("City");
-    if (employer.country) completed++; else missingFields.push("Country");
+    if (refreshedEmployer.companyLocation) completed++; else missingFields.push("Company Location");
+    if (refreshedEmployer.city) completed++; else missingFields.push("City");
+    if (refreshedEmployer.country) completed++; else missingFields.push("Country");
 
     // Contact Information (3 fields)
-    if (employer.contactPerson?.name) completed++; else missingFields.push("Contact Person Name");
-    if (employer.contactPerson?.email) completed++; else missingFields.push("Contact Person Email");
-    if (employer.contactPerson?.phone) completed++; else missingFields.push("Contact Person Phone");
+    if (refreshedEmployer.contactPerson?.name) completed++; else missingFields.push("Contact Person Name");
+    if (refreshedEmployer.contactPerson?.email) completed++; else missingFields.push("Contact Person Email");
+    if (refreshedEmployer.contactPerson?.phone) completed++; else missingFields.push("Contact Person Phone");
 
     // Social Links (3 fields)
-    if (employer.socialLinks?.linkedin) completed++; else missingFields.push("LinkedIn");
-    if (employer.socialLinks?.facebook) completed++; else missingFields.push("Facebook");
-    if (employer.socialLinks?.twitter) completed++; else missingFields.push("Twitter");
+    if (refreshedEmployer.socialLinks?.linkedin) completed++; else missingFields.push("LinkedIn");
+    if (refreshedEmployer.socialLinks?.facebook) completed++; else missingFields.push("Facebook");
+    if (refreshedEmployer.socialLinks?.twitter) completed++; else missingFields.push("Twitter");
 
     const percentage = Math.round((completed / totalFields) * 100);
-    const canPostJob = percentage >= 80;
+    const profileComplete = percentage >= 80;
+    const jobPosting = getJobPostingStatus(refreshedEmployer);
+    const canPostJob = profileComplete && jobPosting.hasPostingSlot;
 
     // Debug logging for troubleshooting
     console.log('📊 EMPLOYER ELIGIBILITY CHECK:', {
@@ -738,26 +748,29 @@ exports.checkEmployerEligibility = async (req, res) => {
       totalFields: totalFields,
       percentage: percentage,
       canPostJob: canPostJob,
-      companyName: employer.companyName,
-      industry: employer.industry,
-      missingFieldsCount: missingFields.length
+      companyName: refreshedEmployer.companyName,
+      industry: refreshedEmployer.industry,
+      missingFieldsCount: missingFields.length,
+      jobPostingLimit: jobPosting.limit,
     });
 
     res.status(200).json({
       success: true,
       data: {
         canPostJob: canPostJob,
+        profileComplete,
         profileCompletion: {
           percentage: percentage,
           completed: completed,
           total: totalFields,
           missingFields: missingFields
         },
+        jobPosting,
         companyInfo: {
-          companyName: employer.companyName || null,
-          industry: employer.industry || null,
-          teamSize: employer.teamSize || null,
-          aboutCompany: employer.aboutCompany || null
+          companyName: refreshedEmployer.companyName || null,
+          industry: refreshedEmployer.industry || null,
+          teamSize: refreshedEmployer.teamSize || null,
+          aboutCompany: refreshedEmployer.aboutCompany || null
         }
       }
     });
@@ -768,6 +781,182 @@ exports.checkEmployerEligibility = async (req, res) => {
       success: false,
       message: "Failed to check employer eligibility",
       error: error.message 
+    });
+  }
+};
+
+// Spend points to unlock one additional job posting slot
+exports.unlockJobPostingWithPoints = async (req, res) => {
+  try {
+    const employerId = req.user?.id;
+    if (!employerId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized. Please login first.",
+      });
+    }
+
+    let employer = await Employer.findById(employerId);
+    if (!employer) {
+      return res.status(404).json({
+        success: false,
+        message: "Employer not found",
+      });
+    }
+
+    employer = await syncEmployerJobPostingLimit(employer);
+
+    if (hasJobPostingSlot(employer)) {
+      return res.status(200).json({
+        success: true,
+        message: "You already have a job posting slot available.",
+        jobPosting: getJobPostingStatus(employer),
+      });
+    }
+
+    const pointsCost = employer.jobPostingPoints ?? 100;
+    const currentPoints = employer.points ?? 0;
+
+    if (currentPoints < pointsCost) {
+      const jobPosting = getJobPostingStatus(employer);
+      return res.status(400).json({
+        success: false,
+        message: `You need ${pointsCost} points to unlock another job post. You currently have ${currentPoints} points.`,
+        jobPosting,
+      });
+    }
+
+    employer.points = currentPoints - pointsCost;
+    employer.jobPostingLimit = 1;
+    await employer.save();
+
+    try {
+      const Reward = require("../model/RewardSchema");
+      const rewardTx = new Reward({
+        userId: employerId,
+        userModel: "Employer",
+        rewardType: "activity",
+        points: -pointsCost,
+        rewardHistory: [{
+          description: `Unlocked an additional job posting slot (${pointsCost} points)`,
+          date: new Date(),
+          points: -pointsCost,
+        }],
+      });
+      await rewardTx.save();
+    } catch (logErr) {
+      console.error("Failed to log job posting unlock transaction:", logErr);
+    }
+
+    const jobPosting = getJobPostingStatus(employer);
+
+    return res.status(200).json({
+      success: true,
+      message: `Job posting slot unlocked! ${pointsCost} points were deducted.`,
+      jobPosting,
+      points: employer.points,
+    });
+  } catch (error) {
+    console.error("Unlock job posting error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to unlock job posting slot",
+      error: error.message,
+    });
+  }
+};
+
+const EmployerRmPostingRequest = require("../model/EmployerRmPostingRequestSchema");
+
+exports.logRmPostingConnect = async (req, res) => {
+  try {
+    const employerId = req.user?.id;
+    if (!employerId) {
+      return res.status(401).json({ success: false, message: "Unauthorized." });
+    }
+
+    const employer = await Employer.findById(employerId).select(
+      "name companyName email companyEmail phoneNumber contactPerson"
+    );
+    if (!employer) {
+      return res.status(404).json({ success: false, message: "Employer not found." });
+    }
+
+    const contactName =
+      employer.contactPerson?.name?.trim() || employer.name || "";
+    const contactEmail =
+      employer.contactPerson?.email?.trim() ||
+      employer.companyEmail?.trim() ||
+      employer.email ||
+      "";
+
+    const record = await EmployerRmPostingRequest.create({
+      employerId,
+      employerName: contactName,
+      companyName: employer.companyName || "",
+      employerEmail: contactEmail,
+      status: "connect_clicked",
+      clickedAt: new Date(),
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Relationship Manager connect logged.",
+      data: { requestId: record._id },
+    });
+  } catch (error) {
+    console.error("logRmPostingConnect error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to log Relationship Manager request",
+      error: error.message,
+    });
+  }
+};
+
+exports.submitRmPostingQuery = async (req, res) => {
+  try {
+    const employerId = req.user?.id;
+    const { requestId, query } = req.body;
+
+    if (!employerId) {
+      return res.status(401).json({ success: false, message: "Unauthorized." });
+    }
+    if (!requestId) {
+      return res.status(400).json({ success: false, message: "requestId is required." });
+    }
+    if (!query || !String(query).trim()) {
+      return res.status(400).json({ success: false, message: "Query is required." });
+    }
+
+    const record = await EmployerRmPostingRequest.findOne({
+      _id: requestId,
+      employerId,
+    });
+
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        message: "Request not found.",
+      });
+    }
+
+    record.query = String(query).trim();
+    record.status = "query_submitted";
+    record.submittedAt = new Date();
+    await record.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Query submitted successfully.",
+      data: record,
+    });
+  } catch (error) {
+    console.error("submitRmPostingQuery error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to submit query",
+      error: error.message,
     });
   }
 };

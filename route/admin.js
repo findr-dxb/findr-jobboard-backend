@@ -23,6 +23,8 @@ const {
   updateService,
   getGrievances,
   getGrievance,
+  getRmPostingRequests,
+  provideRmPosting,
   getFindrStarsAdmin,
   createFindrStarAdmin,
   deleteFindrStarAdmin
@@ -93,6 +95,9 @@ router.get("/admin/grievances", getGrievances);
 
 // Admin Get Grievance by ID
 router.get("/admin/grievances/:id", getGrievance);
+
+router.get("/admin/rm-posting-requests", getRmPostingRequests);
+router.post("/admin/rm-posting-requests/:id/provide-posting", provideRmPosting);
 
 // Admin Findr Stars Management
 router.get("/admin/stars", getFindrStarsAdmin);

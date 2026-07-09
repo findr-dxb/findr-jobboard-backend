@@ -7,6 +7,12 @@ const {
 const Application = require("../model/ApplicationSchema");
 const Employer = require("../model/EmployerSchema");
 const ReferralInvite = require("../model/ReferralInviteSchema");
+const {
+  syncEmployerJobPostingLimit,
+  hasJobPostingSlot,
+  getJobPostingStatus,
+  getEffectiveJobPostingLimit,
+} = require("../utils/employerJobPosting");
 
 exports.createJob = async (req, res) => {
   try {
@@ -15,6 +21,25 @@ exports.createJob = async (req, res) => {
       return res
         .status(401)
         .json({ message: "Unauthorized. Please login as an employer." });
+    }
+
+    let employer = await Employer.findById(employerId);
+    if (!employer) {
+      return res.status(404).json({ message: "Employer not found." });
+    }
+
+    employer = await syncEmployerJobPostingLimit(employer);
+
+    if (!hasJobPostingSlot(employer)) {
+      const jobPosting = getJobPostingStatus(employer);
+      return res.status(403).json({
+        message:
+          jobPosting.canUnlockWithPoints
+            ? `You have used your job posting slot. Spend ${jobPosting.pointsCost} points to post another job, or wait ${jobPosting.daysUntilFreeSlot} day(s) for a free slot.`
+            : `You have used your job posting slot. Wait ${jobPosting.daysUntilFreeSlot} day(s) for your next free post, or earn ${jobPosting.pointsCost} points to unlock another job.`,
+        code: "JOB_POSTING_LIMIT_REACHED",
+        jobPosting,
+      });
     }
 
     const { title, location, experienceLevel } = req.body;
@@ -54,9 +79,14 @@ exports.createJob = async (req, res) => {
     const newJob = new Job(jobData);
     await newJob.save();
 
+    employer.jobPostingLimit = Math.max(0, getEffectiveJobPostingLimit(employer) - 1);
+    employer.lastJobPostedAt = new Date();
+    await employer.save();
+
     res.status(201).json({
       message: "Job created successfully",
       data: newJob,
+      jobPosting: getJobPostingStatus(employer),
     });
 
     setImmediate(async () => {

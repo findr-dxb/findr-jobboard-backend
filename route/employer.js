@@ -13,7 +13,10 @@ const {
   getEmployerReviewByApplication,
   getAllEmployerReviews,
   deleteEmployerReview,
-  checkEmployerEligibility
+  checkEmployerEligibility,
+  unlockJobPostingWithPoints,
+  logRmPostingConnect,
+  submitRmPostingQuery,
 } = require("../controller/SaveEmployerProfile");
 const authMiddleware = require("../middleware/auth");
 
@@ -21,6 +24,9 @@ const authMiddleware = require("../middleware/auth");
 router.get("/employer/details", authMiddleware, getEmployerProfileDetails);
 router.put("/employer/update", authMiddleware, updateEmployerProfile);
 router.get("/employer/eligibility", authMiddleware, checkEmployerEligibility);
+router.post("/employer/unlock-job-posting", authMiddleware, unlockJobPostingWithPoints);
+router.post("/employer/rm-posting-request/connect", authMiddleware, logRmPostingConnect);
+router.post("/employer/rm-posting-request/submit", authMiddleware, submitRmPostingQuery);
 
 // Public company profile (no auth required)
 router.get("/company/:employerId", getPublicCompanyProfile);

@@ -5,6 +5,7 @@ const Application = require("../model/ApplicationSchema");
 const QuoteRequest = require("../model/QuoteRequestSchema");
 const Admin = require("../model/AdminSchema");
 const Grievance = require("../model/Grievance");
+const EmployerRmPostingRequest = require("../model/EmployerRmPostingRequestSchema");
 const jwt = require("jsonwebtoken");
 
 // Helper function to map quote service name to HR service enum
@@ -1487,6 +1488,166 @@ exports.getGrievance = async (req, res) => {
       success: false,
       message: "Failed to fetch grievance",
       error: error.message
+    });
+  }
+};
+
+exports.getRmPostingRequests = async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
+    const skip = (page - 1) * limit;
+    const status = req.query.status;
+
+    const filter = {};
+    if (status === "connect_clicked") {
+      filter.submittedAt = null;
+    } else if (status === "query_submitted") {
+      filter.submittedAt = { $ne: null };
+    } else if (status === "posting_provided") {
+      filter.postingProvidedAt = { $ne: null };
+    }
+
+    const [requests, total, connectOnlyCount, querySubmittedCount, postingProvidedCount, allTotal] =
+      await Promise.all([
+      EmployerRmPostingRequest.find(filter)
+        .populate(
+          "employerId",
+          "name companyName email companyEmail phoneNumber industry teamSize companyLogo points contactPerson socialLinks jobPostingLimit jobPostingGrantExpiresAt jobPostingGrantedAt"
+        )
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      EmployerRmPostingRequest.countDocuments(filter),
+      EmployerRmPostingRequest.countDocuments({ submittedAt: null }),
+      EmployerRmPostingRequest.countDocuments({ submittedAt: { $ne: null } }),
+      EmployerRmPostingRequest.countDocuments({ postingProvidedAt: { $ne: null } }),
+      EmployerRmPostingRequest.countDocuments({}),
+    ]);
+
+    const statusCounts = {
+      connect_clicked: connectOnlyCount,
+      query_submitted: querySubmittedCount,
+      posting_provided: postingProvidedCount,
+      total: allTotal,
+    };
+
+    return res.json({
+      success: true,
+      data: {
+        requests,
+        statusCounts,
+        pagination: {
+          current: page,
+          pages: Math.ceil(total / limit) || 1,
+          total,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("getRmPostingRequests error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch RM posting requests",
+      error: error.message,
+    });
+  }
+};
+
+exports.provideRmPosting = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { numberOfPostings, expiryDate } = req.body;
+
+    const postingsCount = parseInt(numberOfPostings, 10);
+    if (!postingsCount || postingsCount < 1 || postingsCount > 100) {
+      return res.status(400).json({
+        success: false,
+        message: "Number of postings must be between 1 and 100.",
+      });
+    }
+
+    if (!expiryDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Expiry date is required.",
+      });
+    }
+
+    const { endOfUtcDay } = require("../utils/employerJobPosting");
+    const grantExpiresAt = endOfUtcDay(expiryDate);
+    if (!grantExpiresAt) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expiry date.",
+      });
+    }
+
+    const todayEnd = endOfUtcDay(new Date());
+    if (grantExpiresAt < todayEnd) {
+      return res.status(400).json({
+        success: false,
+        message: "Expiry date must be today or in the future.",
+      });
+    }
+
+    const request = await EmployerRmPostingRequest.findById(id);
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: "RM posting request not found",
+      });
+    }
+
+    const grantedAt = new Date();
+
+    const employer = await Employer.findByIdAndUpdate(
+      request.employerId,
+      {
+        $set: {
+          jobPostingLimit: postingsCount,
+          jobPostingGrantedAt: grantedAt,
+          jobPostingGrantExpiresAt: grantExpiresAt,
+        },
+      },
+      { new: true }
+    ).select("companyName jobPostingLimit jobPostingGrantedAt jobPostingGrantExpiresAt");
+
+    if (!employer) {
+      return res.status(404).json({
+        success: false,
+        message: "Employer not found",
+      });
+    }
+
+    request.postingsGranted = postingsCount;
+    request.grantExpiresAt = grantExpiresAt;
+    request.postingProvidedAt = grantedAt;
+    await request.save();
+
+    return res.json({
+      success: true,
+      message: "Job posting slots granted to employer",
+      data: {
+        employerId: employer._id,
+        companyName: employer.companyName,
+        jobPostingLimit: employer.jobPostingLimit,
+        jobPostingGrantedAt: employer.jobPostingGrantedAt,
+        jobPostingGrantExpiresAt: employer.jobPostingGrantExpiresAt,
+        postingsGranted: request.postingsGranted,
+        grantExpiresAt: request.grantExpiresAt,
+        postingProvidedAt: request.postingProvidedAt,
+        status: request.status,
+      },
+    });
+  } catch (error) {
+    console.error("provideRmPosting error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to grant job posting slot",
+      error: error.message,
     });
   }
 };
