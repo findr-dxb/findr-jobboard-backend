@@ -1508,12 +1508,12 @@ const getFindrStarsList = async (type) => {
   if (userIds.length > 0) {
     if (type === 'jobseeker') {
       const users = await FindrUser.find({ _id: { $in: userIds } })
-        .select("name fullName profilePicture points")
+        .select("name fullName profilePicture points updatedAt")
         .lean();
       users.forEach(u => usersMap.set(u._id.toString(), u));
     } else {
       const employers = await Employer.find({ _id: { $in: userIds } })
-        .select("name companyName companyLogo profilePhoto points")
+        .select("name companyName companyLogo profilePhoto points updatedAt")
         .lean();
       employers.forEach(e => usersMap.set(e._id.toString(), e));
     }

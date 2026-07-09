@@ -1875,12 +1875,12 @@ exports.getFindrStars = async (req, res) => {
       if (userIds.length > 0) {
         if (type === 'jobseeker') {
           const users = await User.find({ _id: { $in: userIds } })
-            .select("name fullName profilePicture points")
+            .select("name fullName profilePicture points updatedAt")
             .lean();
           users.forEach(u => usersMap.set(u._id.toString(), u));
         } else {
           const employers = await Employer.find({ _id: { $in: userIds } })
-            .select("name companyName companyLogo profilePhoto points")
+            .select("name companyName companyLogo profilePhoto points updatedAt")
             .lean();
           employers.forEach(e => usersMap.set(e._id.toString(), e));
         }
@@ -1897,6 +1897,7 @@ exports.getFindrStars = async (req, res) => {
             const userUpdatedAt = userObj.updatedAt ? new Date(userObj.updatedAt) : new Date(0);
             const starUpdatedAt = star.updatedAt ? new Date(star.updatedAt) : new Date(0);
 
+            // Prefer live profile only when the user updated after the admin override
             if (userUpdatedAt > starUpdatedAt) {
               if (type === 'jobseeker') {
                 name = userObj.fullName || userObj.name || name;
@@ -1997,6 +1998,7 @@ exports.getFindrStars = async (req, res) => {
     const jobseekers = await getFindrStarsList('jobseeker');
     const employers = await getFindrStarsList('employer');
     
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     return res.status(200).json({
       success: true,
       data: {
