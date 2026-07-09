@@ -1158,22 +1158,21 @@ exports.getReferralJoinerProfile = async (req, res) => {
       });
     }
 
-    // 1) Try to find a jobseeker referred by the current user
-    let referredUser = await User.findOne({ _id: id, referredBy: userId }).select("-password");
-    let type = "jobseeker";
+    // 1–2) Invite-code link in either direction (you referred them, or they referred you)
+    const referralLink = await getBidirectionalReferralUser(userId, id);
+    let referredUser = referralLink?.user ?? null;
+    let type = referralLink?.type ?? "jobseeker";
 
+    // 3) If not referral-linked, check profile access granted in either direction
     if (!referredUser) {
-      // 2) Try employer referred by the current user
-      referredUser = await Employer.findOne({ _id: id, referredBy: userId }).select("-password");
-      type = "employer";
-    }
+      const mongoose = require("mongoose");
+      const viewerObjectId = new mongoose.Types.ObjectId(userId);
+      const targetObjectId = new mongoose.Types.ObjectId(id);
 
-    // 3) If not referred, check if access was granted via profile access request in either direction
-    if (!referredUser) {
       const granted = await ProfileAccessRequest.findOne({
         $or: [
-          { requesterId: userId, targetUserId: id },
-          { requesterId: id, targetUserId: userId }
+          { requesterId: viewerObjectId, targetUserId: targetObjectId },
+          { requesterId: targetObjectId, targetUserId: viewerObjectId },
         ],
         status: "granted",
       });
@@ -1257,10 +1256,8 @@ exports.requestProfileAccess = async (req, res) => {
       });
     }
 
-    // Check if already has access (referred or granted)
-    const referred = await User.findOne({ _id: targetUserId, referredBy: userId }) ||
-      await Employer.findOne({ _id: targetUserId, referredBy: userId });
-    if (referred) {
+    // Check if already has access (referral link in either direction, or profile access granted)
+    if (await hasBidirectionalReferralLink(userId, targetUserId)) {
       return res.status(200).json({
         success: true,
         message: "You already have access to this profile.",
@@ -1269,8 +1266,10 @@ exports.requestProfileAccess = async (req, res) => {
     }
 
     const existingGrant = await ProfileAccessRequest.findOne({
-      requesterId: userId,
-      targetUserId,
+      $or: [
+        { requesterId: userId, targetUserId },
+        { requesterId: targetUserId, targetUserId: userId },
+      ],
       status: "granted",
     });
     if (existingGrant) {
@@ -1281,10 +1280,12 @@ exports.requestProfileAccess = async (req, res) => {
       });
     }
 
-    // Optional: one pending request per requester+target
+    // Optional: one pending request per pair (either direction)
     const pending = await ProfileAccessRequest.findOne({
-      requesterId: userId,
-      targetUserId,
+      $or: [
+        { requesterId: userId, targetUserId },
+        { requesterId: targetUserId, targetUserId: userId },
+      ],
       status: "pending",
       expiresAt: { $gt: new Date() },
     });
@@ -1395,8 +1396,9 @@ exports.confirmProfileAccess = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Access granted successfully.",
-      userId: request.targetUserId.toString(),
+      message: "Access granted successfully. You are now connected in each other's network.",
+      requesterId: request.requesterId.toString(),
+      targetUserId: request.targetUserId.toString(),
     });
   } catch (error) {
     console.error("confirmProfileAccess error:", error);
@@ -1407,6 +1409,44 @@ exports.confirmProfileAccess = async (req, res) => {
     });
   }
 };
+
+/** True when viewer referred target, or target referred viewer (invite-code signup). */
+async function hasBidirectionalReferralLink(viewerId, targetId) {
+  const mongoose = require("mongoose");
+  const targetOid = new mongoose.Types.ObjectId(targetId);
+  const viewerOid = new mongoose.Types.ObjectId(viewerId);
+
+  const forward =
+    (await User.findOne({ _id: targetOid, referredBy: viewerOid }).select("_id")) ||
+    (await Employer.findOne({ _id: targetOid, referredBy: viewerOid }).select("_id"));
+  if (forward) return true;
+
+  const viewer = await User.findById(viewerOid).select("referredBy").lean();
+  return viewer?.referredBy?.toString() === targetOid.toString();
+}
+
+/** Fetch a network member linked by invite-code referral (either direction). */
+async function getBidirectionalReferralUser(viewerId, targetId) {
+  const mongoose = require("mongoose");
+  const targetOid = new mongoose.Types.ObjectId(targetId);
+  const viewerOid = new mongoose.Types.ObjectId(viewerId);
+
+  let user = await User.findOne({ _id: targetOid, referredBy: viewerOid }).select("-password");
+  if (user) return { user, type: "jobseeker" };
+
+  user = await Employer.findOne({ _id: targetOid, referredBy: viewerOid }).select("-password");
+  if (user) return { user, type: "employer" };
+
+  const viewer = await User.findById(viewerOid).select("referredBy").lean();
+  if (viewer?.referredBy?.toString() === targetOid.toString()) {
+    user = await User.findById(targetOid).select("-password");
+    if (user) return { user, type: "jobseeker" };
+    user = await Employer.findById(targetOid).select("-password");
+    if (user) return { user, type: "employer" };
+  }
+
+  return null;
+}
 
 /** Per-member career fields for refer-friend / network UI (not the job being referred). */
 function jobseekerNetworkProfileFields(u) {
@@ -1476,31 +1516,59 @@ exports.getMyNetwork = async (req, res) => {
     const jobseekerSelect =
       "fullName name email role location professionalExperience jobPreferences";
 
-    const [jobseekerInvited, employerInvited] = await Promise.all([
+    const [currentUserRecord, jobseekerInvited, employerInvited] = await Promise.all([
+      User.findById(userId).select("referredBy").lean(),
       User.find({ referredBy: userId }).select(jobseekerSelect).lean(),
       Employer.find({ referredBy: userId })
         .select("companyName name email role companyLocation city country")
         .lean(),
     ]);
 
-    const invited = [
-      ...jobseekerInvited.map((u) => ({
+    const invitedMap = new Map();
+
+    for (const u of jobseekerInvited) {
+      invitedMap.set(u._id.toString(), {
         id:     u._id.toString(),
         name:   u.fullName || u.name || (u.email ? u.email.split("@")[0] : "User"),
         role:   u.role || "jobseeker",
         type:   "invited",
         status: "Joined",
         ...jobseekerNetworkProfileFields(u),
-      })),
-      ...employerInvited.map((e) => ({
+      });
+    }
+
+    for (const e of employerInvited) {
+      invitedMap.set(e._id.toString(), {
         id:     e._id.toString(),
         name:   e.companyName || e.name || (e.email ? e.email.split("@")[0] : "Employer"),
         role:   "employer",
         type:   "invited",
         status: "Joined",
         ...employerNetworkProfileFields(e),
-      })),
-    ];
+      });
+    }
+
+    // Bidirectional: person whose invite code you used also appears in your network
+    if (currentUserRecord?.referredBy) {
+      const referrerId = currentUserRecord.referredBy.toString();
+      if (!invitedMap.has(referrerId)) {
+        const referrer = await User.findById(currentUserRecord.referredBy)
+          .select(jobseekerSelect)
+          .lean();
+        if (referrer) {
+          invitedMap.set(referrerId, {
+            id:     referrerId,
+            name:   referrer.fullName || referrer.name || (referrer.email ? referrer.email.split("@")[0] : "User"),
+            role:   referrer.role || "jobseeker",
+            type:   "invited",
+            status: "Invited you",
+            ...jobseekerNetworkProfileFields(referrer),
+          });
+        }
+      }
+    }
+
+    const invited = Array.from(invitedMap.values());
 
     const referredApps = await Application.find({ referredBy: userId })
       .sort({ appliedDate: -1 })
@@ -1526,18 +1594,29 @@ exports.getMyNetwork = async (req, res) => {
     const invitedFiltered = invited.filter((inv) => !referredIds.has(inv.id));
     const invitedIds = new Set(invitedFiltered.map((inv) => inv.id));
 
+    const mongoose = require("mongoose");
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+
     const grantedRequests = await ProfileAccessRequest.find({
       $or: [
-        { requesterId: userId },
-        { targetUserId: userId }
+        { requesterId: userObjectId },
+        { targetUserId: userObjectId },
       ],
       status: "granted",
     }).select("requesterId targetUserId targetType").lean();
 
+    const searchedSeen = new Set();
     const searchedPromises = grantedRequests.map(async (gr) => {
-      const otherUserId = gr.requesterId.toString() === userId.toString()
-        ? gr.targetUserId
-        : gr.requesterId;
+      const otherUserId =
+        gr.requesterId.toString() === userObjectId.toString()
+          ? gr.targetUserId
+          : gr.requesterId;
+      const otherId = otherUserId.toString();
+
+      if (referredIds.has(otherId) || invitedIds.has(otherId) || searchedSeen.has(otherId)) {
+        return null;
+      }
+      searchedSeen.add(otherId);
 
       let user = await User.findById(otherUserId).select(jobseekerSelect).lean();
       let role = "jobseeker";
@@ -1553,7 +1632,7 @@ exports.getMyNetwork = async (req, res) => {
           ? jobseekerNetworkProfileFields(user)
           : employerNetworkProfileFields(user);
       return {
-        id:     otherUserId.toString(),
+        id:     otherId,
         name:   user.fullName || user.companyName || user.name || (user.email ? user.email.split("@")[0] : "User"),
         role,
         type:   "searched",
@@ -1562,10 +1641,7 @@ exports.getMyNetwork = async (req, res) => {
       };
     });
 
-    const searchedRaw = (await Promise.all(searchedPromises)).filter(Boolean);
-    const searchedFiltered = searchedRaw.filter(
-      (s) => !referredIds.has(s.id) && !invitedIds.has(s.id)
-    );
+    const searchedFiltered = (await Promise.all(searchedPromises)).filter(Boolean);
 
     // Merge with priority: referred > invited > searched
     const merged = [...referred, ...invitedFiltered, ...searchedFiltered];

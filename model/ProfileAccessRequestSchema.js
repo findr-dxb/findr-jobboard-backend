@@ -40,7 +40,11 @@ profileAccessRequestSchema.index({ requesterId: 1, status: 1 });
 profileAccessRequestSchema.index({ targetUserId: 1, status: 1 });
 profileAccessRequestSchema.index({ requesterId: 1, targetUserId: 1 });
 profileAccessRequestSchema.index({ createdAt: -1 });
-profileAccessRequestSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+// Only expire pending requests — granted connections must persist for bidirectional network
+profileAccessRequestSchema.index(
+  { expiresAt: 1 },
+  { expireAfterSeconds: 0, partialFilterExpression: { status: "pending" } }
+);
 
 const ProfileAccessRequest = mongoose.model("ProfileAccessRequest", profileAccessRequestSchema);
 module.exports = ProfileAccessRequest;
