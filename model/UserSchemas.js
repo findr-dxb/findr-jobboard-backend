@@ -247,6 +247,10 @@ const findrUserSchema = new mongoose.Schema(
       default: "active",
       enum: ["active", "blocked"]
     },
+    lastLoginAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );

@@ -207,6 +207,10 @@ const employerSchema = new mongoose.Schema(
       default: "active", 
       enum: ["active", "blocked"] 
     },
+    lastLoginAt: {
+      type: Date,
+      default: null,
+    },
     jobPostingLimit: { type: Number, default:  1 },
     jobPostingPoints: { type: Number, default: 100 },
     lastJobPostedAt: { type: Date, default: null },

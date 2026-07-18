@@ -279,6 +279,10 @@ exports.getUsers = async (req, res) => {
 // Admin Dashboard Statistics Endpoint
 exports.getDashboardStats = async (req, res) => {
   try {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
     // Get all counts in parallel for better performance
     const [
       jobseekerCount,
@@ -286,7 +290,8 @@ exports.getDashboardStats = async (req, res) => {
       activeJobsCount,
       applicationsCount,
       servicesOrdersData,
-      premiumOrdersData
+      premiumOrdersData,
+      monthlyOrdersData
     ] = await Promise.all([
       // Count jobseekers
       FindrUser.countDocuments({ role: "jobseeker" }),
@@ -345,6 +350,30 @@ exports.getDashboardStats = async (req, res) => {
         })
       ]).then(([subscriptionCount, rmServiceCount]) => {
         return subscriptionCount + rmServiceCount;
+      }),
+
+      Promise.all([
+        FindrUser.aggregate([
+          { $match: { role: "jobseeker", orders: { $exists: true, $ne: [] } } },
+          { $unwind: "$orders" },
+          {
+            $match: {
+              "orders.orderDate": { $gte: monthStart, $lt: monthEnd }
+            }
+          },
+          { $count: "total" }
+        ]).then(result => result[0]?.total || 0),
+        Employer.aggregate([
+          { $unwind: "$hrServices" },
+          {
+            $match: {
+              "hrServices.startDate": { $gte: monthStart, $lt: monthEnd }
+            }
+          },
+          { $count: "total" }
+        ]).then(result => result[0]?.total || 0)
+      ]).then(([jobseekerOrdersCount, hrServicesCount]) => {
+        return jobseekerOrdersCount + hrServicesCount;
       })
     ]);
 
@@ -354,7 +383,8 @@ exports.getDashboardStats = async (req, res) => {
       activeJobs: activeJobsCount,
       applications: applicationsCount,
       servicesOrders: servicesOrdersData,
-      premiumOrders: premiumOrdersData
+      premiumOrders: premiumOrdersData,
+      monthlyOrders: monthlyOrdersData
     };
 
     res.status(200).json({
@@ -373,7 +403,255 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
-// Additional endpoint for detailed analytics (optional)
+exports.getNationalityDemographics = async (req, res) => {
+  try {
+    const grouped = await FindrUser.aggregate([
+      {
+        $match: {
+          role: "jobseeker",
+          nationality: { $exists: true, $nin: ["", null] }
+        }
+      },
+      {
+        $group: {
+          _id: { $trim: { input: "$nationality" } },
+          count: { $sum: 1 }
+        }
+      },
+      { $match: { _id: { $ne: "" } } },
+      { $sort: { count: -1 } }
+    ]);
+
+    const total = grouped.reduce((sum, item) => sum + item.count, 0);
+    const top10 = grouped.slice(0, 10);
+    const top10Count = top10.reduce((sum, item) => sum + item.count, 0);
+    const othersCount = total - top10Count;
+
+    const countries = top10.map((item) => ({
+      country: item._id,
+      count: item.count,
+      percentage: total > 0 ? Math.round((item.count / total) * 1000) / 10 : 0
+    }));
+
+    if (othersCount > 0) {
+      countries.push({
+        country: "Others",
+        count: othersCount,
+        percentage: total > 0 ? Math.round((othersCount / total) * 1000) / 10 : 0
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        total,
+        countries
+      },
+      message: "Nationality demographics fetched successfully"
+    });
+  } catch (error) {
+    console.error("Error fetching nationality demographics:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error while fetching nationality demographics",
+      error: error.message
+    });
+  }
+};
+
+exports.getIndustryDistribution = async (req, res) => {
+  try {
+    const grouped = await FindrUser.aggregate([
+      { $match: { role: "jobseeker" } },
+      { $unwind: { path: "$professionalExperience", preserveNullAndEmptyArrays: false } },
+      {
+        $match: {
+          "professionalExperience.industry": { $exists: true, $type: "string", $ne: "" }
+        }
+      },
+      {
+        $project: {
+          userId: "$_id",
+          industries: {
+            $map: {
+              input: { $split: ["$professionalExperience.industry", ","] },
+              as: "ind",
+              in: { $trim: { input: "$$ind" } }
+            }
+          }
+        }
+      },
+      { $unwind: "$industries" },
+      { $match: { industries: { $ne: "" } } },
+      {
+        $project: {
+          userId: 1,
+          industryKey: { $toLower: "$industries" }
+        }
+      },
+      {
+        $group: {
+          _id: { userId: "$userId", industryKey: "$industryKey" }
+        }
+      },
+      {
+        $group: {
+          _id: "$_id.industryKey",
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { count: -1 } },
+      { $limit: 6 }
+    ]);
+
+    const formatIndustryLabel = (value) => {
+      if (!value) return "Other";
+      return String(value)
+        .trim()
+        .toLowerCase()
+        .split(/[\s_]+/)
+        .filter(Boolean)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+    };
+
+    const maxCount = grouped[0]?.count || 0;
+    const industries = grouped.map((item) => ({
+      industry: formatIndustryLabel(item._id),
+      count: item.count,
+      percentage: maxCount > 0 ? Math.round((item.count / maxCount) * 100) : 0
+    }));
+
+    const total = industries.reduce((sum, item) => sum + item.count, 0);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        total,
+        source: "jobseeker",
+        industries
+      },
+      message: "Industry distribution fetched successfully"
+    });
+  } catch (error) {
+    console.error("Error fetching industry distribution:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error while fetching industry distribution",
+      error: error.message
+    });
+  }
+};
+
+exports.getRecentLogins = async (req, res) => {
+  try {
+    const [jobseekers, employers, totalJobseekers, totalEmployers] = await Promise.all([
+      FindrUser.find()
+        .select("_id name fullName email profilePicture loginStatus createdAt")
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .lean(),
+      Employer.find()
+        .select("_id name companyName email companyLogo profilePhoto loginStatus createdAt")
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .lean(),
+      FindrUser.countDocuments(),
+      Employer.countDocuments()
+    ]);
+
+    const users = [
+      ...jobseekers.map((u) => ({
+        _id: u._id,
+        name: u.fullName || u.name || "Unknown",
+        email: u.email || "",
+        avatar: u.profilePicture || "",
+        type: "candidate",
+        status: u.loginStatus === "blocked" ? "inactive" : "active",
+        loginAt: u.createdAt
+      })),
+      ...employers.map((u) => ({
+        _id: u._id,
+        name: u.companyName || u.name || "Unknown",
+        email: u.email || "",
+        avatar: u.companyLogo || u.profilePhoto || "",
+        type: "employer",
+        status: u.loginStatus === "blocked" ? "inactive" : "active",
+        loginAt: u.createdAt
+      }))
+    ]
+      .sort((a, b) => new Date(b.loginAt) - new Date(a.loginAt))
+      .slice(0, 5);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        total: totalJobseekers + totalEmployers,
+        users
+      },
+      message: "New sign-ups fetched successfully"
+    });
+  } catch (error) {
+    console.error("Error fetching new sign-ups:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error while fetching new sign-ups",
+      error: error.message
+    });
+  }
+};
+
+exports.getActiveUsersToday = async (req, res) => {
+  try {
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date();
+    dayEnd.setHours(23, 59, 59, 999);
+
+    const loginFilter = { lastLoginAt: { $gte: dayStart, $lte: dayEnd } };
+
+    const [candidates, employers, candidateLogins, employerLogins] = await Promise.all([
+      FindrUser.countDocuments(loginFilter),
+      Employer.countDocuments(loginFilter),
+      FindrUser.find(loginFilter).select("lastLoginAt").lean(),
+      Employer.find(loginFilter).select("lastLoginAt").lean()
+    ]);
+
+    const hourly = Array.from({ length: 24 }, (_, hour) => ({
+      hour,
+      label: `${hour.toString().padStart(2, "0")}:00`,
+      count: 0
+    }));
+
+    [...candidateLogins, ...employerLogins].forEach((user) => {
+      if (!user.lastLoginAt) return;
+      const hour = new Date(user.lastLoginAt).getHours();
+      if (hour >= 0 && hour < 24) {
+        hourly[hour].count += 1;
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        total: candidates + employers,
+        candidates,
+        employers,
+        date: dayStart.toISOString(),
+        hourly
+      },
+      message: "Active users today fetched successfully"
+    });
+  } catch (error) {
+    console.error("Error fetching active users today:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error while fetching active users today",
+      error: error.message
+    });
+  }
+};
+
 exports.getDashboardAnalytics = async (req, res) => {
   try {
     const [

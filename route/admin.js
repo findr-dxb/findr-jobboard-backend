@@ -8,6 +8,10 @@ const {
   getUsers,
   getDashboardStats,
   getDashboardAnalytics,
+  getNationalityDemographics,
+  getIndustryDistribution,
+  getRecentLogins,
+  getActiveUsersToday,
   getJobs,
   getApplications,
   updateJobStatus,
@@ -45,10 +49,11 @@ router.delete("/admin/admins/:id", deleteAdmin);
 // Admin Users Endpoint - Get users by type
 router.get("/admin/users/:userType", getUsers);
 
-// Admin Dashboard Statistics Endpoint
 router.get("/admin/dashboard/stats", getDashboardStats);
-
-// Additional endpoint for detailed analytics (optional)
+router.get("/admin/dashboard/nationality", getNationalityDemographics);
+router.get("/admin/dashboard/industry", getIndustryDistribution);
+router.get("/admin/dashboard/recent-logins", getRecentLogins);
+router.get("/admin/dashboard/active-users-today", getActiveUsersToday);
 router.get("/admin/dashboard/analytics", getDashboardAnalytics);
 
 // Admin Jobs Endpoint - Get all active jobs

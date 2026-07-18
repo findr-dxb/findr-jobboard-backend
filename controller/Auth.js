@@ -148,16 +148,13 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Direct password comparison
     if (user.password !== password) {
       return res.status(401).json({ 
         message: "Invalid credentials" 
       });
     }
 
-    // Check if email is verified
     if (user.otpVerified === false) {
-      // Re-generate OTP and resend it
       const otp = Math.floor(1000 + Math.random() * 9000).toString();
       user.otp = otp;
       await user.save();
@@ -179,9 +176,11 @@ exports.login = async (req, res) => {
       });
     }
 
-    console.log("Login Response User:", user); // Add this for debugging
+    user.lastLoginAt = new Date();
+    await user.save();
 
-    // Generate JWT token
+    console.log("Login Response User:", user);
+
     const token = jwt.sign(
       { 
         id: user._id,
@@ -191,17 +190,15 @@ exports.login = async (req, res) => {
       { expiresIn: "1d" }
     );
 
-    // Get public profile (excludes password)
     const userProfile = user.getPublicProfile();
 
-    // Ensure name is always present in the response
     const name = userProfile.name || userProfile.fullName || email.split('@')[0];
 
     res.status(200).json({
       message: "Login successful",
       user: {
         ...userProfile,
-        name, // Always include name
+        name,
         points: role === "jobseeker" ? userProfile.rewards?.totalPoints || 0 : undefined,
         profileCompletion: role === "jobseeker" ? userProfile.rewards?.completeProfile || 0 : undefined,
       },
