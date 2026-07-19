@@ -946,6 +946,12 @@ exports.submitRmPostingQuery = async (req, res) => {
     record.submittedAt = new Date();
     await record.save();
 
+    await EmployerRmPostingRequest.deleteMany({
+      employerId,
+      status: "connect_clicked",
+      _id: { $ne: record._id },
+    });
+
     return res.status(200).json({
       success: true,
       message: "Query submitted successfully.",
