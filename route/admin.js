@@ -11,7 +11,9 @@ const {
   getNationalityDemographics,
   getIndustryDistribution,
   getRecentLogins,
+  getSignupsToday,
   getActiveUsersToday,
+  getActiveUsersTodayList,
   getJobs,
   getApplications,
   updateJobStatus,
@@ -53,7 +55,9 @@ router.get("/admin/dashboard/stats", getDashboardStats);
 router.get("/admin/dashboard/nationality", getNationalityDemographics);
 router.get("/admin/dashboard/industry", getIndustryDistribution);
 router.get("/admin/dashboard/recent-logins", getRecentLogins);
+router.get("/admin/dashboard/signups-today", getSignupsToday);
 router.get("/admin/dashboard/active-users-today", getActiveUsersToday);
+router.get("/admin/dashboard/active-users-today/list", getActiveUsersTodayList);
 router.get("/admin/dashboard/analytics", getDashboardAnalytics);
 
 // Admin Jobs Endpoint - Get all active jobs

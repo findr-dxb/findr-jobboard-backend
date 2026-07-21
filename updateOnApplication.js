@@ -26,7 +26,11 @@ const sendApplicationStatusUpdateEmail = async (email, applicantName, jobTitle, 
                 break;
             case 'rejected':
                 subject = `Application Update - ${jobTitle} at ${companyName}`;
-                statusMessage = `Thank you for your interest. Unfortunately, your application for "${jobTitle}" at ${companyName} was not selected at this time.`;
+                statusMessage = `Thank you for your interest in the ${jobTitle} opportunity at ${companyName}.
+
+After reviewing your application, we would like to inform you that your profile does not currently meet the required match level for this particular opportunity. To move forward in the selection process, applications are considered based on how closely the candidate's CV matches the job requirements, with a minimum match of 90% required for this role.
+
+We encourage you to continue exploring other opportunities on Findr that may better match your skills and experience.`;
                 break;
             default:
                 subject = `Application Status Updated - ${jobTitle} at ${companyName}`;

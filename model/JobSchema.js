@@ -90,7 +90,11 @@ const jobSchema = new mongoose.Schema(
     },
     expiredDate: {
       type: Date,
-      default: () => new Date(Date.now() + 15 * 24 * 60 * 60 * 1000)
+      default: () => {
+        const d = new Date();
+        d.setMonth(d.getMonth() + 1);
+        return d;
+      }
     }
   },
   { 

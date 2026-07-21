@@ -69,11 +69,15 @@ exports.createJob = async (req, res) => {
       }
     }
 
+    const expiredDate = new Date();
+    expiredDate.setMonth(expiredDate.getMonth() + 1);
+
     const jobData = {
       ...req.body,
       salary: salaryAmount,
       employer: employerId,
-      status: "active", 
+      status: "active",
+      expiredDate,
     };
 
     const newJob = new Job(jobData);

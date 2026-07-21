@@ -8,6 +8,25 @@ const Grievance = require("../model/Grievance");
 const EmployerRmPostingRequest = require("../model/EmployerRmPostingRequestSchema");
 const jwt = require("jsonwebtoken");
 
+/** Calendar day bounds in Asia/Dubai (Findr marketplace timezone). */
+function getDubaiDayBounds(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Dubai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const get = (type) => parts.find((p) => p.type === type)?.value;
+  const y = get("year");
+  const m = get("month");
+  const d = get("day");
+
+  const dayStart = new Date(`${y}-${m}-${d}T00:00:00+04:00`);
+  const dayEnd = new Date(`${y}-${m}-${d}T23:59:59.999+04:00`);
+  return { dayStart, dayEnd };
+}
+
 // Helper function to map quote service name to HR service enum
 const mapServiceToHREnum = (serviceName) => {
   const mapping = {
@@ -409,18 +428,36 @@ exports.getNationalityDemographics = async (req, res) => {
       {
         $match: {
           role: "jobseeker",
-          nationality: { $exists: true, $nin: ["", null] }
+          nationality: { $exists: true, $type: "string", $nin: ["", null] }
         }
       },
       {
+        $project: {
+          nationalityKey: {
+            $toLower: { $trim: { input: "$nationality" } }
+          }
+        }
+      },
+      { $match: { nationalityKey: { $ne: "" } } },
+      {
         $group: {
-          _id: { $trim: { input: "$nationality" } },
+          _id: "$nationalityKey",
           count: { $sum: 1 }
         }
       },
-      { $match: { _id: { $ne: "" } } },
       { $sort: { count: -1 } }
     ]);
+
+    const formatNationalityLabel = (value) => {
+      if (!value) return "Other";
+      return String(value)
+        .trim()
+        .toLowerCase()
+        .split(/[\s/_-]+/)
+        .filter(Boolean)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+    };
 
     const total = grouped.reduce((sum, item) => sum + item.count, 0);
     const top10 = grouped.slice(0, 10);
@@ -428,7 +465,7 @@ exports.getNationalityDemographics = async (req, res) => {
     const othersCount = total - top10Count;
 
     const countries = top10.map((item) => ({
-      country: item._id,
+      country: formatNationalityLabel(item._id),
       count: item.count,
       percentage: total > 0 ? Math.round((item.count / total) * 1000) / 10 : 0
     }));
@@ -601,12 +638,85 @@ exports.getRecentLogins = async (req, res) => {
   }
 };
 
+exports.getSignupsToday = async (req, res) => {
+  try {
+    const { dayStart, dayEnd } = getDubaiDayBounds();
+
+    const signupFilter = { createdAt: { $gte: dayStart, $lte: dayEnd } };
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const [jobseekers, employers, totalJobseekers, totalEmployers] = await Promise.all([
+      FindrUser.find(signupFilter)
+        .select("_id name fullName email profilePicture loginStatus createdAt")
+        .sort({ createdAt: -1 })
+        .lean(),
+      Employer.find(signupFilter)
+        .select("_id name companyName email companyLogo profilePhoto loginStatus createdAt")
+        .sort({ createdAt: -1 })
+        .lean(),
+      FindrUser.countDocuments(signupFilter),
+      Employer.countDocuments(signupFilter)
+    ]);
+
+    const allUsers = [
+      ...jobseekers.map((u) => ({
+        _id: u._id,
+        name: u.fullName || u.name || "Unknown",
+        email: u.email || "",
+        avatar: u.profilePicture || "",
+        type: "candidate",
+        status: u.loginStatus === "blocked" ? "inactive" : "active",
+        signupAt: u.createdAt
+      })),
+      ...employers.map((u) => ({
+        _id: u._id,
+        name: u.companyName || u.name || "Unknown",
+        email: u.email || "",
+        avatar: u.companyLogo || u.profilePhoto || "",
+        type: "employer",
+        status: u.loginStatus === "blocked" ? "inactive" : "active",
+        signupAt: u.createdAt
+      }))
+    ].sort((a, b) => new Date(b.signupAt) - new Date(a.signupAt));
+
+    const total = totalJobseekers + totalEmployers;
+    const totalPages = Math.ceil(total / limit) || 0;
+    const users = allUsers.slice(skip, skip + limit);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        total,
+        candidates: totalJobseekers,
+        employers: totalEmployers,
+        date: dayStart.toISOString(),
+        users,
+        pagination: {
+          currentPage: page,
+          totalPages,
+          totalCount: total,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1,
+          limit
+        }
+      },
+      message: "Today's sign-ups fetched successfully"
+    });
+  } catch (error) {
+    console.error("Error fetching today's sign-ups:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error while fetching today's sign-ups",
+      error: error.message
+    });
+  }
+};
+
 exports.getActiveUsersToday = async (req, res) => {
   try {
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date();
-    dayEnd.setHours(23, 59, 59, 999);
+    const { dayStart, dayEnd } = getDubaiDayBounds();
 
     const loginFilter = { lastLoginAt: { $gte: dayStart, $lte: dayEnd } };
 
@@ -623,11 +733,19 @@ exports.getActiveUsersToday = async (req, res) => {
       count: 0
     }));
 
+    const dubaiHourFormatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Dubai",
+      hour: "numeric",
+      hour12: false
+    });
+
     [...candidateLogins, ...employerLogins].forEach((user) => {
       if (!user.lastLoginAt) return;
-      const hour = new Date(user.lastLoginAt).getHours();
-      if (hour >= 0 && hour < 24) {
-        hourly[hour].count += 1;
+      const hour = Number(dubaiHourFormatter.format(new Date(user.lastLoginAt)));
+      // en-GB can return "24" for midnight in some engines — normalize
+      const normalizedHour = hour === 24 ? 0 : hour;
+      if (normalizedHour >= 0 && normalizedHour < 24) {
+        hourly[normalizedHour].count += 1;
       }
     });
 
@@ -647,6 +765,82 @@ exports.getActiveUsersToday = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Internal server error while fetching active users today",
+      error: error.message
+    });
+  }
+};
+
+exports.getActiveUsersTodayList = async (req, res) => {
+  try {
+    const { dayStart, dayEnd } = getDubaiDayBounds();
+
+    const loginFilter = { lastLoginAt: { $gte: dayStart, $lte: dayEnd } };
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const [jobseekers, employers, totalJobseekers, totalEmployers] = await Promise.all([
+      FindrUser.find(loginFilter)
+        .select("_id name fullName email profilePicture loginStatus lastLoginAt")
+        .sort({ lastLoginAt: -1 })
+        .lean(),
+      Employer.find(loginFilter)
+        .select("_id name companyName email companyLogo profilePhoto loginStatus lastLoginAt")
+        .sort({ lastLoginAt: -1 })
+        .lean(),
+      FindrUser.countDocuments(loginFilter),
+      Employer.countDocuments(loginFilter)
+    ]);
+
+    const allUsers = [
+      ...jobseekers.map((u) => ({
+        _id: u._id,
+        name: u.fullName || u.name || "Unknown",
+        email: u.email || "",
+        avatar: u.profilePicture || "",
+        type: "candidate",
+        status: u.loginStatus === "blocked" ? "inactive" : "active",
+        loginAt: u.lastLoginAt
+      })),
+      ...employers.map((u) => ({
+        _id: u._id,
+        name: u.companyName || u.name || "Unknown",
+        email: u.email || "",
+        avatar: u.companyLogo || u.profilePhoto || "",
+        type: "employer",
+        status: u.loginStatus === "blocked" ? "inactive" : "active",
+        loginAt: u.lastLoginAt
+      }))
+    ].sort((a, b) => new Date(b.loginAt) - new Date(a.loginAt));
+
+    const total = totalJobseekers + totalEmployers;
+    const totalPages = Math.ceil(total / limit) || 0;
+    const users = allUsers.slice(skip, skip + limit);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        total,
+        candidates: totalJobseekers,
+        employers: totalEmployers,
+        date: dayStart.toISOString(),
+        users,
+        pagination: {
+          currentPage: page,
+          totalPages,
+          totalCount: total,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1,
+          limit
+        }
+      },
+      message: "Active users today list fetched successfully"
+    });
+  } catch (error) {
+    console.error("Error fetching active users today list:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error while fetching active users today list",
       error: error.message
     });
   }

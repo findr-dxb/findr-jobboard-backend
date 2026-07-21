@@ -1737,6 +1737,7 @@ exports.verifyOTP = async (req, res) => {
     // Set verified
     user.otpVerified = true;
     user.otp = "";
+    user.lastLoginAt = new Date();
     await user.save();
 
     // Award referral rewards if referredBy exists

@@ -64,7 +64,6 @@ function calculateJobseekerProfileCompletion(user) {
     { label: "Nationality", ok: isFilled(user.nationality) },
     { label: "Emirates ID", ok: isFilled(user.emirateId) },
     { label: "Passport Number", ok: isFilled(user.passportNumber) },
-    { label: "Professional Summary", ok: isFilled(user.professionalSummary) },
   ];
   if (isNonEmirati(nationality)) {
     personalChecks.push({
