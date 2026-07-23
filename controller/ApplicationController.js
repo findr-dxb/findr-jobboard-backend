@@ -9,6 +9,10 @@ const {
   expireJobsPastApplicationDeadline,
 } = require("../utils/expireJobsByDeadline");
 const { calculateJobseekerProfileCompletion } = require("../utils/jobseekerProfileCompletion");
+const {
+  determineJobseekerMembershipFromUser,
+  getMembershipMultiplier,
+} = require("../utils/jobseekerMembership");
 
 /** Points awarded to employer when marking an application hired; reversed on un-hire. */
 const EMPLOYER_HIRE_REWARD_POINTS = 50;
@@ -1275,19 +1279,8 @@ exports.confirmReferralApplication = async (req, res) => {
         const referrer = await User.findById(invite.referrerId);
         if (!referrer) return;
 
-        const referrerCompletion = calculateJobseekerProfileCompletion(referrer);
-        const basePoints = referrerCompletion.profilePoints;
-        const yearsExp = referrer.professionalExperience?.[0]?.yearsOfExperience || 0;
-        const isEmirati = referrer.nationality?.toLowerCase()?.includes("emirati");
-        const tier = isEmirati ? "Platinum" : yearsExp >= 10 ? "Gold" : yearsExp >= 3 ? "Silver" : "Blue";
-        const expLevel = yearsExp < 3 ? "Blue" : yearsExp < 10 ? "Silver" : "Gold";
-        const multiplierMap = {
-          Platinum: { Blue: 2.0, Silver: 3.0, Gold: 4.0 },
-          Gold: { Blue: 2.0, Silver: 2.0, Gold: 2.0 },
-          Silver: { Blue: 1.5, Silver: 1.5, Gold: 1.5 },
-          Blue: { Blue: 1.0, Silver: 1.0, Gold: 1.0 },
-        };
-        const multiplier = multiplierMap[tier]?.[expLevel] || 1.0;
+        const tier = determineJobseekerMembershipFromUser(referrer);
+        const multiplier = getMembershipMultiplier(tier);
         const points = Math.round(20 * multiplier);
 
         await User.findByIdAndUpdate(invite.referrerId, {
@@ -1297,8 +1290,11 @@ exports.confirmReferralApplication = async (req, res) => {
             "rewards.totalPoints": points,
             "rewards.referFriend": points,
           },
+          $set: {
+            membershipTier: tier,
+          },
         });
-        console.log(`[ReferralPoints] +${points} awarded to referrer ${invite.referrerId}`);
+        console.log(`[ReferralPoints] +${points} awarded to referrer ${invite.referrerId} (tier=${tier}, multiplier=${multiplier})`);
       } catch (err) {
         console.error("[ReferralPoints] Error:", err.message);
       }

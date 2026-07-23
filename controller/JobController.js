@@ -3,6 +3,7 @@ const User = require("../model/UserSchemas");
 const {
   expireJobsPastApplicationDeadline,
   utcStartOfDay,
+  validateApplicationDeadline,
 } = require("../utils/expireJobsByDeadline");
 const Application = require("../model/ApplicationSchema");
 const Employer = require("../model/EmployerSchema");
@@ -58,6 +59,11 @@ exports.createJob = async (req, res) => {
       });
     }
 
+    const deadlineCheck = validateApplicationDeadline(req.body.applicationDeadline);
+    if (!deadlineCheck.valid) {
+      return res.status(400).json({ message: deadlineCheck.message });
+    }
+
     let salaryAmount = req.body.salary;
     if (req.body.salary && typeof req.body.salary === "object") {
       if (req.body.salary.min !== undefined) {
@@ -77,6 +83,7 @@ exports.createJob = async (req, res) => {
       salary: salaryAmount,
       employer: employerId,
       status: "active",
+      applicationDeadline: deadlineCheck.deadline,
       expiredDate,
     };
 
@@ -222,15 +229,18 @@ exports.updateJob = async (req, res) => {
       }
     }
 
-    // If deadline is extended to today or later (UTC calendar day), reactivate expired jobs
     if (updateData.applicationDeadline !== undefined) {
-      const parsed = new Date(updateData.applicationDeadline);
-      if (!Number.isNaN(parsed.getTime())) {
-        const deadlineDay = utcStartOfDay(parsed);
-        const todayStart = utcStartOfDay(new Date());
-        if (deadlineDay >= todayStart && job.status === "expired") {
-          updateData.status = "active";
-        }
+      const deadlineCheck = validateApplicationDeadline(updateData.applicationDeadline);
+      if (!deadlineCheck.valid) {
+        return res.status(400).json({ message: deadlineCheck.message });
+      }
+
+      updateData.applicationDeadline = deadlineCheck.deadline;
+
+      const deadlineDay = utcStartOfDay(deadlineCheck.deadline);
+      const todayStart = utcStartOfDay(new Date());
+      if (deadlineDay >= todayStart && job.status === "expired") {
+        updateData.status = "active";
       }
     }
 

@@ -2,6 +2,10 @@ const User = require("../model/UserSchemas");
 const Employer = require("../model/EmployerSchema");
 const ProfileAccessRequest = require("../model/ProfileAccessRequestSchema");
 const { calculateJobseekerProfileCompletion } = require("../utils/jobseekerProfileCompletion");
+const {
+  determineJobseekerMembershipFromUser,
+  getMembershipMultiplier,
+} = require("../utils/jobseekerMembership");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 require("dotenv").config();
@@ -84,11 +88,13 @@ exports.signup = async (req, res) => {
     if (role === "jobseeker") {
       const completion = calculateJobseekerProfileCompletion(newUser);
       const calculatedPoints = completion.profilePoints;
+      const membership = determineJobseekerMembershipFromUser(newUser);
 
       newUser.rewards.totalPoints = calculatedPoints;
       newUser.points = calculatedPoints;
       newUser.rewards.completeProfile = calculatedPoints;
       newUser.profileCompleted = completion.percentage.toString();
+      newUser.membershipTier = membership;
       await newUser.save();
     }
 
@@ -328,7 +334,7 @@ exports.getUserProfileDetails = async (req, res) => {
       role: publicProfile.role || userRole,
       name: publicProfile.name || "",
       points: publicProfile.points || 0,
-      membershipTier: publicProfile.membershipTier || "Blue",
+      membershipTier: publicProfile.membershipTier || "Prime",
       linkedIn: user.linkedIn || false,
       instagram: user.instagram || false,
     };
@@ -535,6 +541,7 @@ exports.updateProfile = async (req, res) => {
     const completion = calculateJobseekerProfileCompletion(updatedUser);
     const percentage = completion.percentage;
     const calculatedPoints = completion.profilePoints;
+    const membership = determineJobseekerMembershipFromUser(updatedUser);
     
     // Add other points
     const applicationPoints = updatedUser?.rewards?.applyForJobs || 0;
@@ -573,7 +580,8 @@ exports.updateProfile = async (req, res) => {
       'rewards.completeProfile': calculatedPoints,
       'rewards.totalPoints': totalPoints,
       'points': totalPoints,
-      'profileCompleted': calculatedProfileCompleted
+      'profileCompleted': calculatedProfileCompleted,
+      'membershipTier': membership,
     };
 
     // Preserve socialMediaBonus if it exists
@@ -628,6 +636,20 @@ exports.checkProfileEligibility = async (req, res) => {
     const missingFields = completion.missingFields;
     const hasResume = completion.hasResume;
     const canApply = completion.canApply;
+
+    // Keep stored percentage + membership in sync with live calculation
+    const membership = determineJobseekerMembershipFromUser(user);
+    if (
+      String(user.profileCompleted || "") !== String(percentage) ||
+      user.membershipTier !== membership
+    ) {
+      User.updateOne(
+        { _id: user._id },
+        { $set: { profileCompleted: String(percentage), membershipTier: membership } }
+      ).catch((err) => {
+        console.error("Failed to sync profileCompleted/membershipTier:", err.message);
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -1745,40 +1767,8 @@ exports.verifyOTP = async (req, res) => {
       try {
         const referrer = await User.findById(user.referredBy);
         if (referrer) {
-          const referrerCompletion = calculateJobseekerProfileCompletion(referrer);
-
-          const getExperienceLevel = (yearsExp) => {
-            if (yearsExp < 3) return 'Blue';
-            else if (yearsExp >= 3 && yearsExp < 10) return 'Silver';
-            else return 'Gold';
-          };
-
-          const getTierMultiplier = (tier, experienceLevel) => {
-            const A = 1.0;
-            if (tier === 'Platinum') {
-              if (experienceLevel === 'Blue') return 2.0;
-              else if (experienceLevel === 'Silver') return 3.0;
-              else return 4.0;
-            } else if (tier === 'Gold') return 2.0 * A;
-            else if (tier === 'Silver') return 1.5 * A;
-            else return 1.0 * A;
-          };
-
-          const determineUserTier = (basePoints, yearsExp, isEmirati) => {
-            if (isEmirati) return "Platinum";
-            else if (yearsExp >= 10) return "Gold";
-            else if (yearsExp >= 3 && yearsExp < 10) return "Silver";
-            else return "Blue";
-          };
-
-          const percentage = referrerCompletion.percentage;
-          const basePoints = referrerCompletion.profilePoints;
-          const yearsExp = referrer?.professionalExperience?.[0]?.yearsOfExperience || 0;
-          const isEmirati = referrer?.nationality?.toLowerCase()?.includes("emirati");
-          const experienceLevel = getExperienceLevel(yearsExp);
-          const tier = determineUserTier(basePoints, yearsExp, isEmirati);
-          
-          const multiplier = getTierMultiplier(tier, experienceLevel);
+          const tier = determineJobseekerMembershipFromUser(referrer);
+          const multiplier = getMembershipMultiplier(tier);
           const baseReferralPoints = 100;
           const multipliedReferralPoints = Math.round(baseReferralPoints * multiplier);
 
@@ -1788,6 +1778,9 @@ exports.verifyOTP = async (req, res) => {
               "referralRewardPoints": multipliedReferralPoints,
               "rewards.totalPoints": multipliedReferralPoints,
               "rewards.referFriend": multipliedReferralPoints
+            },
+            $set: {
+              membershipTier: tier,
             }
           }, { new: true });
 
@@ -1808,6 +1801,8 @@ exports.verifyOTP = async (req, res) => {
 
             console.log('[ReferralSignupPoints] Successfully awarded referral points on verification:', user.referredBy, {
               points: multipliedReferralPoints,
+              tier,
+              multiplier,
               newUserEmail: email
             });
           }

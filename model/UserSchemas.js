@@ -241,7 +241,12 @@ const findrUserSchema = new mongoose.Schema(
     instagram: { type: Boolean, default: false },
     points: { type: Number, default: 0 },
     deductedPoints: { type: Number, default: 0 }, // Track points deducted from orders
-    membershipTier: { type: String, default: "Blue", enum: ["Blue", "Silver", "Gold", "Platinum"] },
+    membershipTier: {
+      type: String,
+      default: "Prime",
+      // Include legacy Blue/Silver/Gold/Platinum so existing docs still save until recalculated
+      enum: ["Prime", "Plus", "Pro", "Elite", "Icon", "Blue", "Silver", "Gold", "Platinum"],
+    },
     loginStatus: {
       type: String,
       default: "active",
