@@ -1386,28 +1386,40 @@ exports.getJobDetails = async (req, res) => {
     }
 
     // Transform job data to match frontend expectations
+    const salaryValue =
+      typeof job.salary === "number"
+        ? job.salary
+        : job.salary?.min || job.salary?.max || 0;
+
     const jobDetails = {
       id: job._id.toString(),
       jobTitle: job.title,
-      companyName: job.companyName || job.employer?.companyName || 'N/A',
+      companyName: job.companyName || job.employer?.companyName || "N/A",
       location: job.location,
-      jobType: Array.isArray(job.jobType) ? job.jobType.join(', ') : job.jobType,
-      minimumSalary: job.salary?.min || 0,
-      maximumSalary: job.salary?.max || 0,
-      applicationDeadline: job.applicationDeadline ? new Date(job.applicationDeadline).toISOString().split('T')[0] : 'N/A',
+      jobType: Array.isArray(job.jobType) ? job.jobType.join(", ") : job.jobType,
+      experienceLevel: job.experienceLevel || "",
+      nationality: job.nationality || "",
+      salary: salaryValue,
+      minimumSalary: typeof job.salary === "object" ? job.salary?.min || 0 : salaryValue,
+      maximumSalary: typeof job.salary === "object" ? job.salary?.max || 0 : salaryValue,
+      applicationDeadline: job.applicationDeadline
+        ? new Date(job.applicationDeadline).toISOString().split("T")[0]
+        : "N/A",
       status: job.status,
-      description: job.description || '',
+      description: job.description || "",
       requirements: job.requirements || [],
       benefits: job.benefits || [],
       skills: job.skills || [],
       views: job.views || 0,
-      employerInfo: job.employer ? {
-        name: job.employer.companyName,
-        email: job.employer.email,
-        logo: job.employer.companyLogo
-      } : null,
+      employerInfo: job.employer
+        ? {
+            name: job.employer.companyName,
+            email: job.employer.email,
+            logo: job.employer.companyLogo,
+          }
+        : null,
       postedDate: job.createdAt,
-      lastUpdated: job.updatedAt
+      lastUpdated: job.updatedAt,
     };
 
     console.log('Sending job details response for ID:', jobId);
