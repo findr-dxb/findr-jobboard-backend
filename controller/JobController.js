@@ -14,6 +14,10 @@ const {
   getJobPostingStatus,
   getEffectiveJobPostingLimit,
 } = require("../utils/employerJobPosting");
+const {
+  EMPLOYER_HIDDEN_STATUSES,
+  isEmployerVisibleStatus,
+} = require("../utils/applicationVisibility");
 
 exports.createJob = async (req, res) => {
   try {
@@ -444,9 +448,19 @@ exports.getJob = async (req, res) => {
       );
     }
 
-    // Add application count for easy access
+    // Add application count for easy access (hide admin-screening apps from employers)
     const jobData = job.toObject();
-    jobData.applicationCount = job.applications ? job.applications.length : 0;
+    const apps = Array.isArray(job.applications) ? job.applications : [];
+    const visibleApps = isOwner
+      ? apps.filter((app) => {
+          const status = app?.status;
+          return status ? isEmployerVisibleStatus(status) : true;
+        })
+      : apps;
+    jobData.applications = visibleApps.map((app) =>
+      app && typeof app === "object" && app._id ? app._id : app
+    );
+    jobData.applicationCount = visibleApps.length;
 
     res.status(200).json({
       message: "Job fetched successfully",
@@ -531,17 +545,27 @@ exports.getEmployerJobs = async (req, res) => {
         "employer",
         "companyName companyLocation companyDescription companyWebsite",
       )
-      .populate("applications")
+      .populate({
+        path: "applications",
+        match: { status: { $nin: EMPLOYER_HIDDEN_STATUSES } },
+        select: "_id status appliedDate",
+      })
       .sort({ createdAt: -1 })
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum);
 
     const total = await Job.countDocuments(query);
 
+    const jobsWithCounts = jobs.map((job) => {
+      const jobData = job.toObject();
+      jobData.applicationCount = job.applications?.length || 0;
+      return jobData;
+    });
+
     res.status(200).json({
       message: "Employer jobs fetched successfully",
       data: {
-        jobs,
+        jobs: jobsWithCounts,
         pagination: {
           total,
           pages: Math.ceil(total / limitNum),

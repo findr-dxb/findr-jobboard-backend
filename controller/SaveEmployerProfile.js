@@ -8,6 +8,7 @@ const {
   getJobPostingStatus,
   hasJobPostingSlot,
 } = require("../utils/employerJobPosting");
+const { EMPLOYER_HIDDEN_STATUSES, employerVisibleQuery } = require("../utils/applicationVisibility");
 
 exports.getEmployerProfileDetails = async (req, res) => {
   try {
@@ -262,8 +263,10 @@ exports.getEmployerDashboardStats = async (req, res) => {
     const pausedJobs = await Job.countDocuments({ employer: employerId, status: "paused" });
     const closedJobs = await Job.countDocuments({ employer: employerId, status: "closed" });
 
-    // Get application statistics
-    const totalApplications = await Application.countDocuments({ employerId });
+    // Get application statistics (employer-visible only)
+    const totalApplications = await Application.countDocuments(
+      employerVisibleQuery({ employerId })
+    );
     const pendingApplications = await Application.countDocuments({ employerId, status: "pending" });
     const shortlistedApplications = await Application.countDocuments({ employerId, status: "shortlisted" });
     const interviewScheduled = await Application.countDocuments({ employerId, status: "interview_scheduled" });
@@ -271,13 +274,13 @@ exports.getEmployerDashboardStats = async (req, res) => {
     const rejectedApplications = await Application.countDocuments({ employerId, status: "rejected" });
 
     // Get recent applications (last 10)
-    const recentApplications = await Application.find({ employerId })
+    const recentApplications = await Application.find(employerVisibleQuery({ employerId }))
       .populate('jobId', 'title companyName')
       .populate('applicantId', 'name email profilePicture membershipTier')
       .sort({ appliedDate: -1 })
       .limit(10);
 
-    // Get top performing jobs (by application count)
+    // Get top performing jobs (by employer-visible application count)
     const topJobs = await Job.aggregate([
       { $match: { employer: employerId } },
       {
@@ -285,7 +288,10 @@ exports.getEmployerDashboardStats = async (req, res) => {
           from: "applications",
           localField: "_id",
           foreignField: "jobId",
-          as: "applications"
+          as: "applications",
+          pipeline: [
+            { $match: { status: { $nin: EMPLOYER_HIDDEN_STATUSES } } }
+          ]
         }
       },
       {
@@ -1007,7 +1013,10 @@ exports.getEmployerDashboard = async (req, res) => {
                   from: "applications",
                   localField: "_id",
                   foreignField: "jobId",
-                  as: "_apps"
+                  as: "_apps",
+                  pipeline: [
+                    { $match: { status: { $nin: EMPLOYER_HIDDEN_STATUSES } } }
+                  ]
                 }
               },
               {
@@ -1024,9 +1033,9 @@ exports.getEmployerDashboard = async (req, res) => {
         }
       ]),
 
-      // 3. Application stats — single aggregation with $facet
+      // 3. Application stats — employer-visible only
       Application.aggregate([
-        { $match: { employerId: empObjId } },
+        { $match: { employerId: empObjId, status: { $nin: EMPLOYER_HIDDEN_STATUSES } } },
         {
           $facet: {
             stats: [
@@ -1043,7 +1052,7 @@ exports.getEmployerDashboard = async (req, res) => {
       ]),
 
       // 4. Recent 5 applications with applicant name + job title
-      Application.find({ employerId: empObjId })
+      Application.find(employerVisibleQuery({ employerId: empObjId }))
         .sort({ appliedDate: -1 })
         .limit(5)
         .select("appliedDate status applicantId jobId")

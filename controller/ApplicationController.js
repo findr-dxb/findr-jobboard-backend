@@ -13,6 +13,11 @@ const {
   determineJobseekerMembershipFromUser,
   getMembershipMultiplier,
 } = require("../utils/jobseekerMembership");
+const {
+  EMPLOYER_HIDDEN_STATUSES,
+  isAdminScreeningStatus,
+  employerVisibleQuery,
+} = require("../utils/applicationVisibility");
 
 /** Points awarded to employer when marking an application hired; reversed on un-hire. */
 const EMPLOYER_HIRE_REWARD_POINTS = 50;
@@ -216,11 +221,11 @@ exports.createApplication = async (req, res) => {
     let application;
     
     if (withdrawnApplication) {
-      // Reactivate the withdrawn application instead of creating a new one
+      // Reactivate into admin review (not employer pipeline yet)
       application = await Application.findByIdAndUpdate(
         withdrawnApplication._id,
         {
-          status: 'pending',
+          status: 'admin_review',
           expectedSalary,
           availability,
           coverLetter,
@@ -231,24 +236,21 @@ exports.createApplication = async (req, res) => {
         { new: true }
       );
 
-      // Add back to job's applications array if not already there
       await Job.findByIdAndUpdate(jobId, {
-        $addToSet: { applications: application._id } // $addToSet prevents duplicates
+        $addToSet: { applications: application._id },
+        $inc: { views: 1 },
       });
 
-      // Add back to employer's applications array if not already there
       await Employer.findByIdAndUpdate(job.employer, {
-        $addToSet: { applications: application._id } // $addToSet prevents duplicates
+        $addToSet: { applications: application._id }
       });
 
-      // Only increment activeApplications (not totalApplications since it was already counted)
       await User.findByIdAndUpdate(applicantId, {
         $inc: { 
           "applications.activeApplications": 1
         }
       });
     } else {
-      // Create new application
       application = new Application({
         jobId,
         applicantId,
@@ -256,17 +258,17 @@ exports.createApplication = async (req, res) => {
         expectedSalary,
         availability,
         coverLetter,
-        resume: req.body.resume || "", // Should be file URL from upload
+        resume: req.body.resume || "",
+        status: "admin_review",
       });
 
       await application.save();
 
-      // Update job applications array
       await Job.findByIdAndUpdate(jobId, {
-        $push: { applications: application._id }
+        $push: { applications: application._id },
+        $inc: { views: 1 },
       });
 
-      // Update employer applications array
       await Employer.findByIdAndUpdate(job.employer, {
         $push: { applications: application._id }
       });
@@ -295,10 +297,10 @@ exports.createApplication = async (req, res) => {
 
     setImmediate(async () => {
       try {
-        const { sendApplicationConfirmationEmail, sendNewApplicationNotificationEmail } = require('../applyForJob');
+        const { sendApplicationConfirmationEmail } = require('../applyForJob');
         const applicantName = applicant.fullName || applicant.name || 'Job Seeker';
         
-        // Send email to jobseeker
+        // Confirm to jobseeker only. Employer is notified after admin moves to pipeline.
         if (applicant.email) {
           await sendApplicationConfirmationEmail(
             applicant.email,
@@ -308,23 +310,7 @@ exports.createApplication = async (req, res) => {
             application.appliedDate || new Date()
           );
         }
-
-        // Send email to employer
-        const employer = await Employer.findById(job.employer).select('email companyEmail contactPerson name companyName');
-        const employerEmail = employer?.companyEmail || employer?.email || employer?.contactPerson?.email;
-        const employerName = employer?.name || employer?.companyName || 'Employer';
-        
-        if (employerEmail) {
-          await sendNewApplicationNotificationEmail(
-            employerEmail,
-            employerName,
-            job.title,
-            applicantName,
-            application.appliedDate || new Date()
-          );
-        }
       } catch (err) {
-        // Email error handled silently
       }
     });
   } catch (error) {
@@ -340,11 +326,10 @@ exports.getEmployerApplications = async (req, res) => {
     const employerId = req.user.id;
     const { status, jobId, page = 1, limit = 20 } = req.query;
 
-    let query = { 
-      employerId,
-      status: { $ne: 'withdrawn' } // Exclude withdrawn applications from employer view
-    };
-    if (status) query.status = status;
+    let query = employerVisibleQuery({ employerId });
+    if (status) {
+      query = employerVisibleQuery({ employerId, status });
+    }
     if (jobId) query.jobId = jobId;
 
     const applications = await Application.find(query)
@@ -394,10 +379,9 @@ exports.getJobApplications = async (req, res) => {
       return res.status(404).json({ message: "Job not found or access denied" });
     }
 
-    const applications = await Application.find({ 
-      jobId,
-      status: { $ne: 'withdrawn' } // Exclude withdrawn applications from employer view
-    })
+    const applications = await Application.find(
+      employerVisibleQuery({ jobId })
+    )
       .populate('applicantDetails', 'name email phone location profilePicture membershipTier professionalSummary')
       .populate('referredBy', 'name fullName email')
       .sort({ appliedDate: -1 });
@@ -424,6 +408,12 @@ exports.updateApplicationStatus = async (req, res) => {
       .populate('referredBy', '_id');
     if (!application) {
       return res.status(404).json({ message: "Application not found or access denied" });
+    }
+
+    if (isAdminScreeningStatus(application.status)) {
+      return res.status(403).json({
+        message: "This application is still under admin review and is not available yet.",
+      });
     }
 
     // Check if this is the first time being viewed
@@ -645,6 +635,12 @@ exports.rateApplicant = async (req, res) => {
       return res.status(404).json({ message: "Application not found or access denied" });
     }
 
+    if (isAdminScreeningStatus(application.status)) {
+      return res.status(403).json({
+        message: "This application is still under admin review and is not available yet.",
+      });
+    }
+
     const updatedApplication = await Application.findByIdAndUpdate(
       applicationId,
       { rating, feedback },
@@ -669,13 +665,12 @@ exports.getEmployerDashboard = async (req, res) => {
   try {
     const employerId = req.user.id;
 
-    // Get counts (exclude withdrawn applications from employer view)
+    // Get counts (exclude admin screening + withdrawn)
     const totalJobs = await Job.countDocuments({ employer: employerId });
     const activeJobs = await Job.countDocuments({ employer: employerId, status: "active" });
-    const totalApplications = await Application.countDocuments({ 
-      employerId, 
-      status: { $ne: 'withdrawn' } 
-    });
+    const totalApplications = await Application.countDocuments(
+      employerVisibleQuery({ employerId })
+    );
     const pendingApplications = await Application.countDocuments({ 
       employerId, 
       status: "pending" 
@@ -689,17 +684,16 @@ exports.getEmployerDashboard = async (req, res) => {
       status: "hired" 
     });
 
-    // Get recent applications (exclude withdrawn)
-    const recentApplications = await Application.find({ 
-      employerId,
-      status: { $ne: 'withdrawn' }
-    })
+    // Get recent applications (employer-visible only)
+    const recentApplications = await Application.find(
+      employerVisibleQuery({ employerId })
+    )
       .populate('jobDetails', 'title')
       .populate('applicantDetails', 'name email profilePicture membershipTier')
       .sort({ appliedDate: -1 })
       .limit(5);
 
-    // Get active jobs with application counts (exclude withdrawn applications)
+    // Get active jobs with application counts (employer-visible only)
     const activeJobsWithStats = await Job.aggregate([
       { $match: { employer: employerId, status: "active" } },
       {
@@ -709,7 +703,7 @@ exports.getEmployerDashboard = async (req, res) => {
           foreignField: "jobId",
           as: "applications",
           pipeline: [
-            { $match: { status: { $ne: 'withdrawn' } } } // Exclude withdrawn applications
+            { $match: { status: { $nin: EMPLOYER_HIDDEN_STATUSES } } }
           ]
         }
       },
@@ -799,8 +793,13 @@ exports.getUserApplications = async (req, res) => {
     };
 
     statusCounts.forEach(item => {
-      if (stats.hasOwnProperty(item._id)) {
-        stats[item._id] = item.count;
+      const key = item._id;
+      if (key === 'admin_review' || key === 'admin_hold') {
+        stats.pending += item.count;
+      } else if (key === 'admin_rejected') {
+        stats.rejected += item.count;
+      } else if (stats.hasOwnProperty(key)) {
+        stats[key] = item.count;
       }
     });
 
@@ -870,6 +869,12 @@ exports.getApplicationById = async (req, res) => {
       if (!job) {
         console.log('Job not found or access denied for employer');
         return res.status(404).json({ message: "Application not found or access denied" });
+      }
+
+      if (isAdminScreeningStatus(application.status)) {
+        return res.status(403).json({
+          message: "This application is still under admin review and is not available yet.",
+        });
       }
 
       // Mark as viewed by employer and update user's awaitingFeedback count
@@ -1246,6 +1251,7 @@ exports.confirmReferralApplication = async (req, res) => {
       availability: "Immediate",
       resume: invite.resumeUrl || "",
       referredBy: invite.referrerId,
+      status: "admin_review",
     });
     await application.save();
 
@@ -1253,8 +1259,11 @@ exports.confirmReferralApplication = async (req, res) => {
     invite.status = "approved";
     await invite.save();
 
-    // Update job & employer arrays
-    await Job.findByIdAndUpdate(invite.jobId, { $push: { applications: application._id } });
+    // Update job & employer arrays + increase view count
+    await Job.findByIdAndUpdate(invite.jobId, {
+      $push: { applications: application._id },
+      $inc: { views: 1 },
+    });
     await Employer.findByIdAndUpdate(job.employer, { $push: { applications: application._id } });
 
     // Update user B's application count

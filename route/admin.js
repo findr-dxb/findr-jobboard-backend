@@ -16,6 +16,7 @@ const {
   getActiveUsersTodayList,
   getJobs,
   getApplications,
+  updateApplicationScreening,
   updateJobStatus,
   deleteJob,
   getJobDetails,
@@ -67,6 +68,9 @@ router.get("/admin/jobs", getJobs);
 
 // Admin Applications Endpoint - Get all applications
 router.get("/admin/applications", getApplications);
+
+// Admin screening: Move to Pipeline / Hold / Reject
+router.patch("/admin/applications/:applicationId/status", updateApplicationScreening);
 
 // Admin Job Actions Endpoint - Update job status
 router.patch("/admin/jobs/:jobId/status", updateJobStatus);

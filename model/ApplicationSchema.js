@@ -23,6 +23,9 @@ const applicationSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
+        "admin_review",
+        "admin_hold",
+        "admin_rejected",
         "pending",
         "shortlisted",
         "interview_scheduled",
@@ -30,7 +33,7 @@ const applicationSchema = new mongoose.Schema(
         "rejected",
         "withdrawn",
       ],
-      default: "pending",
+      default: "admin_review",
     },
     appliedDate: {
       type: Date,
@@ -140,6 +143,8 @@ applicationSchema.index({ status: 1, interviewDate: 1 });
 applicationSchema.index({ applicantId: 1, status: 1, viewedByEmployer: 1 });
 // Sidebar badge: count applications created since last seen
 applicationSchema.index({ createdAt: -1 });
+applicationSchema.index({ status: 1, appliedDate: -1 });
+applicationSchema.index({ employerId: 1, status: 1, appliedDate: -1 });
 
 // Virtual to populate job details
 applicationSchema.virtual("jobDetails", {

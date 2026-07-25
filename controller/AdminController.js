@@ -1011,75 +1011,272 @@ exports.getJobs = async (req, res) => {
 };
 
 // Admin Applications Endpoint - Get all applications
+// Get all applications for admin panel
 exports.getApplications = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = '', sortBy = 'appliedDate', sortOrder = 'desc', status = 'all' } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const status = req.query.status || "all";
+    const sortBy = req.query.sortBy || "appliedDate";
+    const sortOrder = req.query.sortOrder === "asc" ? 1 : -1;
+    const skip = (page - 1) * limit;
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const sortDirection = sortOrder === 'desc' ? -1 : 1;
+    // Build filter
+    const filter = {};
 
-    // Build search query
-    const searchOr = [];
-    if (search) {
-      searchOr.push(
-        { coverLetter: { $regex: search, $options: 'i' } },
-        { notes: { $regex: search, $options: 'i' } }
-      );
+    // Filter by status (skip if "all")
+    if (status && status !== "all") {
+      if (status === "rejected") {
+        filter.status = { $in: ["rejected", "admin_rejected"] };
+      } else {
+        filter.status = status;
+      }
     }
 
-    const statusFilter = status === 'all' ? { $exists: true } : status;
+    // Fetch applications
+    const applications = await Application.find(filter)
+      .populate("jobId", "title companyName")
+      .populate("applicantId", "name fullName email profilePicture")
+      .sort({ [sortBy]: sortOrder })
+      .skip(skip)
+      .limit(limit)
+      .lean();
 
-    const baseQuery = {
-      ...(searchOr.length ? { $or: searchOr } : {}),
-      ...(status ? { status: statusFilter } : {}),
-    };
+    const totalCount = await Application.countDocuments(filter);
+    const totalPages = Math.ceil(totalCount / limit);
 
-    // Fetch with population
-    const [applications, totalCount] = await Promise.all([
-      Application.find(baseQuery)
-        .populate('jobId', 'title companyName')
-        .populate('applicantId', 'name fullName email')
-        .sort({ [sortBy]: sortDirection })
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean(),
-      Application.countDocuments(baseQuery)
+    // Counts for the summary boxes
+    const statusCounts = await Application.aggregate([
+      { $group: { _id: "$status", count: { $sum: 1 } } },
     ]);
 
-    const transformed = applications.map(app => ({
-      id: app._id.toString(),
-      candidate: app.applicantId?.fullName || app.applicantId?.name || app.applicantId?.email || 'N/A',
-      jobTitle: app.jobId?.title || 'N/A',
-      status: app.status,
-      appliedDate: app.appliedDate,
-      applicationUrl: `/admin/jobs/${app.jobId?._id || ''}`
-    }));
+    const byStatus = {};
+    statusCounts.forEach((row) => {
+      byStatus[row._id] = row.count;
+    });
 
-    const totalPages = Math.ceil(totalCount / parseInt(limit));
-    const hasNextPage = parseInt(page) < totalPages;
-    const hasPrevPage = parseInt(page) > 1;
+    const stats = {
+      total: Object.values(byStatus).reduce((sum, n) => sum + n, 0),
+      movedToPipeline: byStatus.pending || 0,
+      rejected: (byStatus.rejected || 0) + (byStatus.admin_rejected || 0),
+      hold: byStatus.admin_hold || 0,
+      unattended: byStatus.admin_review || 0,
+      shortlisted: byStatus.shortlisted || 0,
+      interviewed: byStatus.interview_scheduled || 0,
+      hired: byStatus.hired || 0,
+    };
+
+    // Format response for frontend
+    const list = applications.map((app) => {
+      const name =
+        app.applicantId?.fullName ||
+        app.applicantId?.name ||
+        app.applicantId?.email ||
+        "N/A";
+
+      const parts = name.split(" ").filter(Boolean);
+      const initials = parts
+        .slice(0, 2)
+        .map((word) => word[0].toUpperCase())
+        .join("");
+
+      return {
+        id: app._id.toString(),
+        candidate: name,
+        candidateInitials: initials || "NA",
+        candidateAvatar: app.applicantId?.profilePicture || "",
+        applicantId: app.applicantId?._id?.toString() || "",
+        jobId: app.jobId?._id?.toString() || "",
+        jobTitle: app.jobId?.title || "N/A",
+        companyName: app.jobId?.companyName || "",
+        status: app.status,
+        appliedDate: app.appliedDate,
+        applicationUrl: app.applicantId?._id
+          ? `/admin/users/jobseeker/${app.applicantId._id}`
+          : `/admin/jobs/${app.jobId?._id || ""}`,
+      };
+    });
 
     res.status(200).json({
       success: true,
       data: {
-        applications: transformed,
+        applications: list,
+        stats,
         pagination: {
-          currentPage: parseInt(page),
+          currentPage: page,
           totalPages,
           totalCount,
-          hasNextPage,
-          hasPrevPage,
-          limit: parseInt(limit)
-        }
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1,
+          limit,
+        },
       },
-      message: "Applications data fetched successfully"
+      message: "Applications data fetched successfully",
     });
   } catch (error) {
     console.error("Error fetching applications data:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error while fetching applications data",
-      error: error.message
+      error: error.message,
+    });
+  }
+};
+
+exports.updateApplicationScreening = async (req, res) => {
+  try {
+    const { applicationId } = req.params;
+    const { action } = req.body;
+
+    const actionMap = {
+      pipeline: 'pending',
+      hold: 'admin_hold',
+      reject: 'admin_rejected',
+    };
+
+    if (!actionMap[action]) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid action. Use 'pipeline', 'hold', or 'reject'.",
+      });
+    }
+
+    const application = await Application.findById(applicationId)
+      .populate('applicantId', 'name fullName email')
+      .populate('jobId', 'title companyName')
+      .populate('employerId', 'email name companyName contactPerson');
+
+    if (!application) {
+      return res.status(404).json({
+        success: false,
+        message: 'Application not found',
+      });
+    }
+
+    const actionableStatuses = ['admin_review', 'admin_hold', 'pending'];
+    if (!actionableStatuses.includes(application.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot ${action} an application with status "${application.status}".`,
+      });
+    }
+
+    if (action === 'pipeline' && application.status === 'pending') {
+      return res.status(200).json({
+        success: true,
+        data: { id: application._id.toString(), status: application.status, action },
+        message: 'Application is already in employer pipeline',
+      });
+    }
+
+    if (action === 'hold' && application.status === 'admin_hold') {
+      return res.status(200).json({
+        success: true,
+        data: { id: application._id.toString(), status: application.status, action },
+        message: 'Application is already on hold',
+      });
+    }
+
+    const previousStatus = application.status;
+    const nextStatus = actionMap[action];
+    application.status = nextStatus;
+    application.updatedAt = new Date();
+    await application.save();
+
+    if (action === 'reject' && previousStatus !== 'admin_rejected') {
+      try {
+        await FindrUser.findByIdAndUpdate(application.applicantId?._id || application.applicantId, {
+          $inc: { 'applications.activeApplications': -1 },
+        });
+      } catch (_) {
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        id: application._id.toString(),
+        status: application.status,
+        action,
+      },
+      message:
+        action === 'pipeline'
+          ? 'Application moved to employer pipeline'
+          : action === 'hold'
+            ? 'Application put on hold'
+            : 'Application rejected',
+    });
+
+    setImmediate(async () => {
+      try {
+        const applicant = application.applicantId;
+        const job = application.jobId;
+        const applicantName = applicant?.fullName || applicant?.name || 'Job Seeker';
+
+        if (action === 'pipeline' && previousStatus !== 'pending') {
+          const { sendNewApplicationNotificationEmail } = require('../applyForJob');
+          const employer = application.employerId;
+          const employerEmail =
+            employer?.email || employer?.contactPerson?.email;
+          const employerName =
+            employer?.name || employer?.companyName || employer?.contactPerson?.name || 'Employer';
+
+          if (employerEmail) {
+            await sendNewApplicationNotificationEmail(
+              employerEmail,
+              employerName,
+              job?.title || 'Job',
+              applicantName,
+              application.appliedDate || new Date()
+            );
+          }
+        }
+
+        if (action === 'reject' && previousStatus !== 'admin_rejected') {
+          // Same rejection email the employer sends
+          const { sendApplicationStatusUpdateEmail } = require('../updateOnApplication');
+
+          let applicantEmail = applicant?.email;
+          let applicantDisplayName = applicantName;
+          if (!applicantEmail) {
+            const freshApplicant = await FindrUser.findById(
+              application.applicantId?._id || application.applicantId
+            ).select('email fullName name');
+            applicantEmail = freshApplicant?.email;
+            applicantDisplayName =
+              freshApplicant?.fullName || freshApplicant?.name || applicantName;
+          }
+
+          let jobTitle = job?.title || 'Job';
+          let companyName = job?.companyName || 'Company';
+          if (!job?.title) {
+            const freshJob = await Job.findById(application.jobId?._id || application.jobId).select(
+              'title companyName'
+            );
+            jobTitle = freshJob?.title || jobTitle;
+            companyName = freshJob?.companyName || companyName;
+          }
+
+          if (applicantEmail) {
+            await sendApplicationStatusUpdateEmail(
+              applicantEmail,
+              applicantDisplayName,
+              jobTitle,
+              companyName,
+              'rejected'
+            );
+          }
+        }
+      } catch (err) {
+        console.error('Admin screening side-effect error:', err);
+      }
+    });
+  } catch (error) {
+    console.error('Error updating application screening:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while updating application',
+      error: error.message,
     });
   }
 };
