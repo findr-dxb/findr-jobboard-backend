@@ -138,6 +138,8 @@ applicationSchema.index({ referredBy: 1, appliedDate: -1 });
 applicationSchema.index({ employerId: 1, appliedDate: -1 });
 applicationSchema.index({ status: 1, interviewDate: 1 });
 applicationSchema.index({ applicantId: 1, status: 1, viewedByEmployer: 1 });
+// Sidebar badge: count applications created since last seen
+applicationSchema.index({ createdAt: -1 });
 
 // Virtual to populate job details
 applicationSchema.virtual("jobDetails", {

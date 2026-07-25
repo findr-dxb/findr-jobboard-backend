@@ -2349,3 +2349,111 @@ exports.deleteFindrStarAdmin = async (req, res) => {
     return res.status(500).json({ success: false, message: "Failed to remove Findr Star override" });
   }
 };
+
+exports.getSidebarBadges = async (req, res) => {
+  try {
+    const parseSince = (value) => {
+      if (!value) return null;
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    };
+
+    const since = {
+      users: parseSince(req.query.users),
+      jobs: parseSince(req.query.jobs),
+      applications: parseSince(req.query.applications),
+      services: parseSince(req.query.services),
+      serviceManagement: parseSince(req.query.serviceManagement),
+      quotation: parseSince(req.query.quotation),
+      grievances: parseSince(req.query.grievances),
+      rmPostingRequests: parseSince(req.query.rmPostingRequests),
+    };
+
+    const countCreatedSince = (Model, sinceDate) => {
+      if (!sinceDate) return Promise.resolve(0);
+      return Model.countDocuments({ createdAt: { $gt: sinceDate } });
+    };
+
+    const countServiceOrdersSince = async (sinceDate) => {
+      if (!sinceDate) return 0;
+
+      const [orderAgg, hrAgg, rmCount] = await Promise.all([
+        FindrUser.aggregate([
+          { $match: { role: "jobseeker", "orders.0": { $exists: true } } },
+          { $unwind: "$orders" },
+          { $match: { "orders.orderDate": { $gt: sinceDate } } },
+          { $count: "n" },
+        ]),
+        Employer.aggregate([
+          { $match: { "hrServices.0": { $exists: true } } },
+          { $unwind: "$hrServices" },
+          {
+            $match: {
+              $or: [
+                { "hrServices.startDate": { $gt: sinceDate } },
+                {
+                  $and: [
+                    { "hrServices.startDate": { $exists: false } },
+                    { updatedAt: { $gt: sinceDate } },
+                  ],
+                },
+              ],
+            },
+          },
+          { $count: "n" },
+        ]),
+        FindrUser.countDocuments({
+          role: "jobseeker",
+          rmService: "Active",
+          updatedAt: { $gt: sinceDate },
+        }),
+      ]);
+
+      return (orderAgg[0]?.n || 0) + (hrAgg[0]?.n || 0) + rmCount;
+    };
+
+    const [
+      newJobseekers,
+      newEmployers,
+      jobs,
+      applications,
+      services,
+      serviceManagement,
+      quotation,
+      grievances,
+      rmPostingRequests,
+    ] = await Promise.all([
+      countCreatedSince(FindrUser, since.users),
+      countCreatedSince(Employer, since.users),
+      countCreatedSince(Job, since.jobs),
+      countCreatedSince(Application, since.applications),
+      countServiceOrdersSince(since.services),
+      countServiceOrdersSince(since.serviceManagement),
+      countCreatedSince(QuoteRequest, since.quotation),
+      countCreatedSince(Grievance, since.grievances),
+      countCreatedSince(EmployerRmPostingRequest, since.rmPostingRequests),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        users: newJobseekers + newEmployers,
+        jobs,
+        applications,
+        services,
+        serviceManagement,
+        quotation,
+        grievances,
+        rmPostingRequests,
+      },
+      message: "Sidebar badges fetched successfully",
+    });
+  } catch (error) {
+    console.error("Error fetching sidebar badges:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch sidebar badges",
+      error: error.message,
+    });
+  }
+};

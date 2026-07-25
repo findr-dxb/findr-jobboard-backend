@@ -4,7 +4,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 const sendApplicationStatusUpdateEmail = async (email, applicantName, jobTitle, companyName, status, interviewInfo = null) => {
     try {
-        const applicationUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/jobseeker/applications`;
+        const applicationUrl = `${process.env.FRONTEND_URL || "https://findr.ae"}/jobseeker/applications`;
 
         let statusMessage = '';
         let subject = '';
@@ -25,10 +25,10 @@ const sendApplicationStatusUpdateEmail = async (email, applicantName, jobTitle, 
                 statusMessage = `Congratulations! You have been selected for the position "${jobTitle}" at ${companyName}.`;
                 break;
             case 'rejected':
-                subject = `Application Update - ${jobTitle} at ${companyName}`;
-                statusMessage = `Thank you for your interest in the ${jobTitle} opportunity at ${companyName}.
+                subject = `Application Update - ${jobTitle}`;
+                statusMessage = `Thank you for your interest in the ${jobTitle} opportunity.
 
-After reviewing your application, we would like to inform you that your profile does not currently meet the required match level for this particular opportunity. To move forward in the selection process, applications are considered based on how closely the candidate's CV matches the job requirements, with a minimum match of 90% required for this role.
+After reviewing your application, we would like to inform you that your profile has not progressed further for this opportunity at this time. Applications are reviewed based on how closely a candidate's CV matches the job requirements, and a minimum match of 90% is required for this role.
 
 We encourage you to continue exploring other opportunities on Findr that may better match your skills and experience.`;
                 break;

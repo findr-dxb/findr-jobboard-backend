@@ -269,6 +269,10 @@ findrUserSchema.index({ loginStatus: 1 });
 findrUserSchema.index({ createdAt: -1 });
 findrUserSchema.index({ referredBy: 1, createdAt: -1 });
 findrUserSchema.index({ resetPasswordToken: 1, resetPasswordExpiry: 1 });
+// Sidebar badge / services counts
+findrUserSchema.index({ "orders.orderDate": -1 });
+findrUserSchema.index({ role: 1, createdAt: -1 });
+findrUserSchema.index({ role: 1, rmService: 1, updatedAt: -1 });
 
 // Pre-save hook to generate referral code for new users
 findrUserSchema.pre('save', async function (next) {

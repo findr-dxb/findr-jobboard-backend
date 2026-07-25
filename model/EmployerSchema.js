@@ -250,6 +250,9 @@ employerSchema.index({ verificationStatus: 1 });
 employerSchema.index({ createdAt: -1 });
 employerSchema.index({ referredBy: 1, createdAt: -1 });
 employerSchema.index({ resetPasswordToken: 1, resetPasswordExpiry: 1 });
+// Sidebar badge / services counts
+employerSchema.index({ "hrServices.startDate": -1 });
+employerSchema.index({ updatedAt: -1 });
 
 employerSchema.pre('save', async function (next) {
   if (this.isNew && (!this.referralCode || this.referralCode === '')) {

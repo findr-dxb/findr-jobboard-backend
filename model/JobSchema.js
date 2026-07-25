@@ -121,6 +121,8 @@ jobSchema.index({ employer: 1 });
 jobSchema.index({ employer: 1, status: 1 });
 jobSchema.index({ status: 1, createdAt: -1 });
 jobSchema.index({ employer: 1, createdAt: -1 });
+// Sidebar badge: count jobs created since last seen
+jobSchema.index({ createdAt: -1 });
 
 const Job = mongoose.model("Job", jobSchema);
 module.exports = Job;

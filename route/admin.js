@@ -33,7 +33,8 @@ const {
   provideRmPosting,
   getFindrStarsAdmin,
   createFindrStarAdmin,
-  deleteFindrStarAdmin
+  deleteFindrStarAdmin,
+  getSidebarBadges
 } = require("../controller/AdminController");
 
 // Create Admin Account
@@ -59,6 +60,7 @@ router.get("/admin/dashboard/signups-today", getSignupsToday);
 router.get("/admin/dashboard/active-users-today", getActiveUsersToday);
 router.get("/admin/dashboard/active-users-today/list", getActiveUsersTodayList);
 router.get("/admin/dashboard/analytics", getDashboardAnalytics);
+router.get("/admin/sidebar-badges", getSidebarBadges);
 
 // Admin Jobs Endpoint - Get all active jobs
 router.get("/admin/jobs", getJobs);
