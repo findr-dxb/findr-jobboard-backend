@@ -16,7 +16,8 @@ function parseSalary(value) {
 
 function isEmiratiNationality(nationality) {
   if (!nationality) return false;
-  return String(nationality).toLowerCase().includes("emirati");
+  const n = String(nationality).toLowerCase();
+  return n.includes("emirati") || n.includes("uae national");
 }
 
 /**

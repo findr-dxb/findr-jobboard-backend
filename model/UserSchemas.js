@@ -82,6 +82,11 @@ const findrUserSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    spokenLanguages: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     emirateId: {
       type: String,
       trim: true,

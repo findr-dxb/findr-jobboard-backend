@@ -370,6 +370,7 @@ exports.getUserProfileDetails = async (req, res) => {
       responseData.introVideo = publicProfile.introVideo || "";
       responseData.resumeDocument = publicProfile.resumeDocument || "";
       responseData.professionalSummary = publicProfile.professionalSummary || "";
+      responseData.spokenLanguages = publicProfile.spokenLanguages || "";
       responseData.refersLink = publicProfile.refersLink || "";
       responseData.referredMember = publicProfile.referredMember || "";
       responseData.professionalExperience = publicProfile.professionalExperience || [];
@@ -437,6 +438,7 @@ exports.updateProfile = async (req, res) => {
       visaExpiryDate,
       introVideo,
       professionalSummary,
+      spokenLanguages,
 
       // Professional Experience
       professionalExperience,
@@ -504,6 +506,7 @@ exports.updateProfile = async (req, res) => {
       ...(visaExpiryDate !== undefined && { visaExpiryDate: visaExpiryDate || null }),
       ...(introVideo && { introVideo }),
       ...(professionalSummary && { professionalSummary }),
+      ...(spokenLanguages !== undefined && { spokenLanguages }),
       
 
       ...(professionalExperience && { professionalExperience }),

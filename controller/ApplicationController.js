@@ -382,7 +382,7 @@ exports.getJobApplications = async (req, res) => {
     const applications = await Application.find(
       employerVisibleQuery({ jobId })
     )
-      .populate('applicantDetails', 'name email phone location profilePicture membershipTier professionalSummary')
+      .populate('applicantDetails', 'name email phone location profilePicture membershipTier professionalSummary spokenLanguages')
       .populate('referredBy', 'name fullName email')
       .sort({ appliedDate: -1 });
 
@@ -505,78 +505,58 @@ exports.updateApplicationStatus = async (req, res) => {
         console.error('[Points] Failed to award hiring points:', pointsErr);
       }
 
-      // Award placement points (1% of job salary) to referrer if application was a referral and friend gets hired
       if (application.referredBy) {
         try {
-          // Fetch job to get salary information
-          const job = await Job.findById(application.jobId).select('salary title companyName');
+          const job = await Job.findById(application.jobId).select('title companyName');
+          const placementPoints = 1000;
           
-          if (job && job.salary) {
-            let jobSalary = 0;
-            if (typeof job.salary === 'object' && job.salary !== null) {
-              // Old format: object with min/max
-              const salaryMin = job.salary.min || 0;
-              const salaryMax = job.salary.max || 0;
-              jobSalary = (salaryMin + salaryMax) / 2;
-            } else if (typeof job.salary === 'number') {
-              // New format: single number
-              jobSalary = job.salary;
+          let referrerId;
+          if (application.referredBy._id) {
+            referrerId = application.referredBy._id.toString();
+          } else if (application.referredBy.toString) {
+            referrerId = application.referredBy.toString();
+          } else {
+            referrerId = application.referredBy;
+          }
+          
+          const updateResult = await User.findByIdAndUpdate(referrerId, {
+            $inc: { 
+              "points": placementPoints,
+              "referralRewardPoints": placementPoints,
+              "rewards.totalPoints": placementPoints,
+              "rewards.referFriend": placementPoints
             }
-            const placementPoints = Math.round(jobSalary * 0.015); // 1.5% of salary as placement points
-            
-            // Handle both populated and unpopulated referredBy field
-            let referrerId;
-            if (application.referredBy._id) {
-              referrerId = application.referredBy._id.toString();
-            } else if (application.referredBy.toString) {
-              referrerId = application.referredBy.toString();
-            } else {
-              referrerId = application.referredBy;
-            }
-            
-            // Update referrer with placement points (1% of job salary)
-            const updateResult = await User.findByIdAndUpdate(referrerId, {
-              $inc: { 
-                "points": placementPoints,
-                "referralRewardPoints": placementPoints,
-                "rewards.totalPoints": placementPoints,
-                "rewards.referFriend": placementPoints
-              }
-            }, { new: true });
-            
-            if (updateResult) {
-              console.log('[ReferralPlacementPoints] ✓ Successfully awarded placement points (1% of salary) to referrer:', {
-                referrerId: referrerId,
-                jobTitle: job.title,
-                companyName: job.companyName,
-                jobSalary: jobSalary,
-                placementPoints: placementPoints,
-                newReferralRewardPoints: updateResult.referralRewardPoints,
-                newPoints: updateResult.points,
-                applicationId: applicationId
+          }, { new: true });
+          
+          if (updateResult) {
+            console.log('[ReferralPlacementPoints] ✓ Successfully awarded 1000 points to referrer:', {
+              referrerId: referrerId,
+              jobTitle: job?.title,
+              companyName: job?.companyName,
+              placementPoints: placementPoints,
+              newReferralRewardPoints: updateResult.referralRewardPoints,
+              newPoints: updateResult.points,
+              applicationId: applicationId
+            });
+            try {
+              const Reward = require("../model/RewardSchema");
+              const rewardTx = new Reward({
+                userId: referrerId,
+                userModel: "FindrUser",
+                rewardType: "activity",
+                points: placementPoints,
+                rewardHistory: [{
+                  description: `Job Placement referral reward for ${job?.title || 'referred job'}`,
+                  date: new Date(),
+                  points: placementPoints
+                }]
               });
-              try {
-                const Reward = require("../model/RewardSchema");
-                const rewardTx = new Reward({
-                  userId: referrerId,
-                  userModel: "FindrUser",
-                  rewardType: "placement",
-                  points: placementPoints,
-                  rewardHistory: [{
-                    description: `Job Placement referral reward for ${job.title}`,
-                    date: new Date(),
-                    points: placementPoints
-                  }]
-                });
-                await rewardTx.save();
-              } catch (logErr) {
-                console.error("Failed to log referral placement reward transaction:", logErr);
-              }
-            } else {
-              console.error('[ReferralPlacementPoints] ✗ Referrer not found:', referrerId);
+              await rewardTx.save();
+            } catch (logErr) {
+              console.error("Failed to log referral placement reward transaction:", logErr);
             }
           } else {
-            console.log('[ReferralPlacementPoints] Job salary not found for job:', application.jobId);
+            console.error('[ReferralPlacementPoints] ✗ Referrer not found:', referrerId);
           }
         } catch (placementErr) {
           console.error('[ReferralPlacementPoints] ✗ Failed to award placement points:', {
@@ -839,7 +819,7 @@ exports.getApplicationById = async (req, res) => {
 
     // Find application with full population
     const application = await Application.findById(applicationId)
-      .populate('applicantId', 'name fullName email phoneNumber location dateOfBirth nationality emirateId passportNumber employmentVisa introVideo resumeDocument professionalSummary refersLink referredMember professionalExperience education skills certifications profilePicture membershipTier jobPreferences socialLinks rmService rewards referralRewardPoints applications savedJobs profileCompleted points')
+      .populate('applicantId', 'name fullName email phoneNumber location dateOfBirth nationality emirateId passportNumber employmentVisa introVideo resumeDocument professionalSummary spokenLanguages refersLink referredMember professionalExperience education skills certifications profilePicture membershipTier jobPreferences socialLinks rmService rewards referralRewardPoints applications savedJobs profileCompleted points')
       .populate({
         path: 'jobId', 
         select: 'title companyName location salary jobType experienceLevel description requirements skills',

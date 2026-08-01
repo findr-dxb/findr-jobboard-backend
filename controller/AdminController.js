@@ -1144,7 +1144,7 @@ exports.updateApplicationScreening = async (req, res) => {
     const application = await Application.findById(applicationId)
       .populate('applicantId', 'name fullName email')
       .populate('jobId', 'title companyName')
-      .populate('employerId', 'email name companyName contactPerson');
+      .populate('employerId', 'email name companyName contactPerson companyEmail');
 
     if (!application) {
       return res.status(404).json({
@@ -1176,6 +1176,10 @@ exports.updateApplicationScreening = async (req, res) => {
         message: 'Application is already on hold',
       });
     }
+
+    const applicant = application.applicantId;
+    const job = application.jobId;
+    const employer = application.employerId;
 
     const previousStatus = application.status;
     const nextStatus = actionMap[action];
@@ -1209,15 +1213,12 @@ exports.updateApplicationScreening = async (req, res) => {
 
     setImmediate(async () => {
       try {
-        const applicant = application.applicantId;
-        const job = application.jobId;
         const applicantName = applicant?.fullName || applicant?.name || 'Job Seeker';
 
         if (action === 'pipeline' && previousStatus !== 'pending') {
           const { sendNewApplicationNotificationEmail } = require('../applyForJob');
-          const employer = application.employerId;
           const employerEmail =
-            employer?.email || employer?.contactPerson?.email;
+            employer?.companyEmail || employer?.email || employer?.contactPerson?.email;
           const employerName =
             employer?.name || employer?.companyName || employer?.contactPerson?.name || 'Employer';
 

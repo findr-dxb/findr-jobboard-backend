@@ -44,7 +44,7 @@ function hasAdditionalDocuments(user) {
 function isNonEmirati(nationality) {
   if (!nationality) return false;
   const n = nationality.toLowerCase();
-  return !n.includes("emirati");
+  return !n.includes("emirati") && !n.includes("uae national");
 }
 
 /**
