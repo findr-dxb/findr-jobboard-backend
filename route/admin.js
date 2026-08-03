@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const authMiddleware = require("../middleware/auth");
 const {
   createAdmin,
   adminLogin,
@@ -35,14 +36,21 @@ const {
   getFindrStarsAdmin,
   createFindrStarAdmin,
   deleteFindrStarAdmin,
-  getSidebarBadges
+  getSidebarBadges,
+  getFilterSearchJobseekers
 } = require("../controller/AdminController");
 
-// Create Admin Account
-router.post("/admin/create-admin", createAdmin);
-
-// Admin Login
 router.post("/admin/login", adminLogin);
+router.use(authMiddleware);
+const adminOnly = (req, res, next) => {
+  if (req.user && (req.user.role === "admin" || req.user.type === "admin" || req.user.role === "superadmin")) {
+    return next();
+  }
+  return res.status(403).json({ success: false, message: "Access denied. Admin role required." });
+};
+router.use(adminOnly);
+
+router.post("/admin/create-admin", createAdmin);
 
 // List all admins
 router.get("/admin/admins", getAdmins);
@@ -52,6 +60,9 @@ router.delete("/admin/admins/:id", deleteAdmin);
 
 // Admin Users Endpoint - Get users by type
 router.get("/admin/users/:userType", getUsers);
+
+// Admin Users Advanced Search
+router.get("/admin/users-search", getFilterSearchJobseekers);
 
 router.get("/admin/dashboard/stats", getDashboardStats);
 router.get("/admin/dashboard/nationality", getNationalityDemographics);

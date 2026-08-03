@@ -2667,3 +2667,177 @@ exports.getSidebarBadges = async (req, res) => {
     });
   }
 };
+
+// Admin Advanced Filter Search for Jobseekers
+exports.getFilterSearchJobseekers = async (req, res) => {
+  try {
+    // Auth validation inside the controller (defense-in-depth)
+    if (!req.user || (req.user.role !== 'admin' && req.user.type !== 'admin' && req.user.role !== 'superadmin')) {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden: Admin access required"
+      });
+    }
+
+    const {
+      name,
+      industry,
+      nationality,
+      minSalary,
+      maxSalary,
+      location,
+      role,
+      spokenLanguages,
+      experience,
+      keyword,
+      mobile,
+      email,
+      page = 1,
+      limit = 10
+    } = req.query;
+
+    // Helper to escape regex special characters (prevents ReDoS/regex injection)
+    const escapeRegex = (text) => {
+      if (!text) return "";
+      return text.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    };
+
+    // Pagination validation and clamping
+    let pageNum = parseInt(page, 10);
+    let limitNum = parseInt(limit, 10);
+
+    if (isNaN(pageNum) || pageNum < 1) pageNum = 1;
+    if (isNaN(limitNum) || limitNum < 1) limitNum = 10;
+    if (limitNum > 100) limitNum = 100; // clamp max limit to 100 to prevent DOS
+
+    const query = { role: "jobseeker" };
+    const andConditions = [];
+
+    if (name) {
+      const nameRegex = { $regex: escapeRegex(name), $options: 'i' };
+      andConditions.push({
+        $or: [
+          { name: nameRegex },
+          { fullName: nameRegex }
+        ]
+      });
+    }
+
+    if (email) {
+      query.email = { $regex: escapeRegex(email), $options: 'i' };
+    }
+
+    if (mobile) {
+      query.phoneNumber = { $regex: escapeRegex(mobile), $options: 'i' };
+    }
+
+    if (location) {
+      query.location = { $regex: escapeRegex(location), $options: 'i' };
+    }
+
+    if (nationality) {
+      query.nationality = { $regex: escapeRegex(nationality), $options: 'i' };
+    }
+
+    if (spokenLanguages) {
+      query.spokenLanguages = { $regex: escapeRegex(spokenLanguages), $options: 'i' };
+    }
+
+    if (keyword) {
+      const keywordRegex = { $regex: escapeRegex(keyword), $options: 'i' };
+      andConditions.push({
+        $or: [
+          { skills: keywordRegex },
+          { certifications: keywordRegex },
+          { professionalSummary: keywordRegex }
+        ]
+      });
+    }
+
+    if (industry) {
+      query['professionalExperience.industry'] = { $regex: escapeRegex(industry), $options: 'i' };
+    }
+
+    if (role) {
+      query['professionalExperience.currentRole'] = { $regex: escapeRegex(role), $options: 'i' };
+    }
+
+    if (experience) {
+      const expYears = parseInt(experience, 10);
+      if (!isNaN(expYears)) {
+        query['professionalExperience.yearsOfExperience'] = { $gte: expYears };
+      }
+    }
+
+    if (minSalary || maxSalary) {
+      const salaryConds = [];
+      if (minSalary) {
+        salaryConds.push({ 'jobPreferences.salaryExpectation': { $regex: escapeRegex(minSalary), $options: 'i' } });
+      }
+      if (maxSalary) {
+        salaryConds.push({ 'jobPreferences.salaryExpectation': { $regex: escapeRegex(maxSalary), $options: 'i' } });
+      }
+      if (salaryConds.length > 0) {
+        andConditions.push({ $or: salaryConds });
+      }
+    }
+
+    if (andConditions.length > 0) {
+      query.$and = andConditions;
+    }
+
+    const skip = (pageNum - 1) * limitNum;
+
+    const [users, totalCount] = await Promise.all([
+      FindrUser.find(query)
+        .select('-password -__v')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      FindrUser.countDocuments(query)
+    ]);
+
+    const transformedUsers = users.map(user => ({
+      id: user._id.toString(),
+      fullName: user.fullName || user.name || 'N/A',
+      emailAddress: user.email,
+      phoneNumber: user.phoneNumber || 'N/A',
+      location: user.location || 'N/A',
+      nationality: user.nationality || 'N/A',
+      currentRole: user.professionalExperience?.[0]?.currentRole || 'N/A',
+      company: user.professionalExperience?.[0]?.company || 'N/A',
+      yearsOfExperience: user.professionalExperience?.[0]?.yearsOfExperience || 0,
+      industry: user.professionalExperience?.[0]?.industry || 'N/A',
+      profileUrl: `/candidate/${user._id}`,
+      loginStatus: user.loginStatus || 'active',
+      profileImage: user.profilePicture || '',
+      spokenLanguages: user.spokenLanguages || '',
+      joinedDate: user.createdAt,
+      lastActive: user.updatedAt
+    }));
+
+    const totalPages = Math.ceil(totalCount / limitNum);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        users: transformedUsers,
+        pagination: {
+          currentPage: pageNum,
+          totalPages,
+          totalCount,
+          hasNextPage: pageNum < totalPages,
+          hasPrevPage: pageNum > 1,
+          limit: limitNum
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Error in filter search:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error while searching users"
+    });
+  }
+};

@@ -334,7 +334,7 @@ exports.getEmployerApplications = async (req, res) => {
 
     const applications = await Application.find(query)
       .populate('jobId', 'title companyName location salary')
-      .populate('applicantId', 'name fullName email phoneNumber location dateOfBirth nationality emirateId passportNumber employmentVisa introVideo resumeDocument professionalSummary refersLink referredMember professionalExperience education skills certifications profilePicture membershipTier jobPreferences socialLinks rmService rewards referralRewardPoints applications savedJobs profileCompleted points')
+      .populate('applicantId', 'name fullName email phoneNumber location dateOfBirth nationality emirateId passportNumber employmentVisa introVideo resumeDocument professionalSummary refersLink referredMember professionalExperience education skills certifications profilePicture membershipTier jobPreferences socialLinks rmService rewards referralRewardPoints applications savedJobs profileCompleted points spokenLanguages')
       .populate('referredBy', 'name fullName email')
       .sort({ appliedDate: -1 })
       .limit(limit * 1)
