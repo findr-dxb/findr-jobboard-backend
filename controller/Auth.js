@@ -1984,13 +1984,10 @@ exports.getFindrStars = async (req, res) => {
         }
 
         return {
-          id: star._id,
           name,
           profilePicture,
           points,
-          appreciationMessage: star.appreciationMessage,
-          userId: star.userId || null,
-          isSystemGenerated: false
+          appreciationMessage: star.appreciationMessage
         };
       });
 
@@ -2021,13 +2018,10 @@ exports.getFindrStars = async (req, res) => {
             }
 
             finalStars.push({
-              id: js._id,
               name: js.fullName || js.name || "Findr Seeker",
               profilePicture: js.profilePicture || "",
               points: js.points || 0,
-              appreciationMessage: message,
-              userId: js._id,
-              isSystemGenerated: true
+              appreciationMessage: message
             });
           });
         } else {
@@ -2052,13 +2046,10 @@ exports.getFindrStars = async (req, res) => {
             }
 
             finalStars.push({
-              id: emp._id,
               name: emp.companyName || emp.name || "Findr Partner",
               profilePicture: emp.companyLogo || emp.profilePhoto || "",
               points: emp.points || 0,
-              appreciationMessage: message,
-              userId: emp._id,
-              isSystemGenerated: true
+              appreciationMessage: message
             });
           });
         }
