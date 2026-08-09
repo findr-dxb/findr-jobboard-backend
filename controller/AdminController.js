@@ -434,7 +434,16 @@ exports.getNationalityDemographics = async (req, res) => {
       {
         $project: {
           nationalityKey: {
-            $toLower: { $trim: { input: "$nationality" } }
+            $cond: {
+              if: {
+                $in: [
+                  { $toLower: { $trim: { input: "$nationality" } } },
+                  ["uae", "emirates", "emirati", "united arab emirates", "emirate", "uae citizen", "emirati citizen"]
+                ]
+              },
+              then: "emirati",
+              else: { $toLower: { $trim: { input: "$nationality" } } }
+            }
           }
         }
       },
@@ -2736,11 +2745,17 @@ exports.getFilterSearchJobseekers = async (req, res) => {
     }
 
     if (nationality) {
-      query.nationality = { $regex: escapeRegex(nationality), $options: 'i' };
+      const natRegexStr = nationality.split(',').map(n => escapeRegex(n.trim())).filter(Boolean).join('|');
+      if (natRegexStr) {
+        query.nationality = { $regex: natRegexStr, $options: 'i' };
+      }
     }
 
     if (spokenLanguages) {
-      query.spokenLanguages = { $regex: escapeRegex(spokenLanguages), $options: 'i' };
+      const langRegexStr = spokenLanguages.split(',').map(l => escapeRegex(l.trim())).filter(Boolean).join('|');
+      if (langRegexStr) {
+        query.spokenLanguages = { $regex: langRegexStr, $options: 'i' };
+      }
     }
 
     if (keyword) {
@@ -2755,11 +2770,17 @@ exports.getFilterSearchJobseekers = async (req, res) => {
     }
 
     if (industry) {
-      query['professionalExperience.industry'] = { $regex: escapeRegex(industry), $options: 'i' };
+      const indRegexStr = industry.split(',').map(i => escapeRegex(i.trim())).filter(Boolean).join('|');
+      if (indRegexStr) {
+        query['professionalExperience.industry'] = { $regex: indRegexStr, $options: 'i' };
+      }
     }
 
     if (role) {
-      query['professionalExperience.currentRole'] = { $regex: escapeRegex(role), $options: 'i' };
+      const roleRegexStr = role.split(',').map(r => escapeRegex(r.trim())).filter(Boolean).join('|');
+      if (roleRegexStr) {
+        query['professionalExperience.currentRole'] = { $regex: roleRegexStr, $options: 'i' };
+      }
     }
 
     if (experience) {

@@ -371,11 +371,13 @@ exports.getJobs = async (req, res) => {
     const jobs = await Job.find(query)
       .populate(
         "employer",
-        "companyName companyLocation companyDescription companyWebsite",
+        "companyName",
       )
+      .select("title companyName location jobType salary createdAt description experienceLevel applicationDeadline featured views employer")
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
-      .limit(limit);
+      .limit(limit)
+      .lean();
 
     const total = await Job.countDocuments(query);
 
@@ -457,9 +459,14 @@ exports.getJob = async (req, res) => {
           return status ? isEmployerVisibleStatus(status) : true;
         })
       : apps;
-    jobData.applications = visibleApps.map((app) =>
-      app && typeof app === "object" && app._id ? app._id : app
-    );
+    
+    if (isOwner) {
+      jobData.applications = visibleApps.map((app) =>
+        app && typeof app === "object" && app._id ? app._id : app
+      );
+    } else {
+      delete jobData.applications;
+    }
     jobData.applicationCount = visibleApps.length;
 
     res.status(200).json({
