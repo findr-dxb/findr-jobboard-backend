@@ -1726,7 +1726,11 @@ exports.getUserProfile = async (req, res) => {
     } else if (userType === 'employer') {
       user = await Employer.findById(id)
         .select('-__v')
-        .populate('referredBy', 'name fullName email profilePicture socialLinks');
+        .populate('referredBy', 'name fullName email profilePicture socialLinks')
+        .populate({
+          path: 'postedJobs',
+          select: 'title location jobType status applications createdAt',
+        });
     } else {
       return res.status(400).json({
         success: false,
@@ -1741,9 +1745,17 @@ exports.getUserProfile = async (req, res) => {
       });
     }
 
+    let responseData = user.toObject ? user.toObject() : user;
+    if (userType === 'employer') {
+      const jobs = await Job.find({ employer: id })
+        .select('title location jobType status applications createdAt')
+        .lean();
+      responseData.postedJobs = jobs;
+    }
+
     res.json({
       success: true,
-      data: user
+      data: responseData
     });
   } catch (error) {
     console.error('Error fetching user profile:', error);
