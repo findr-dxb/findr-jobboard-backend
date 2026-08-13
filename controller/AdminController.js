@@ -969,8 +969,7 @@ exports.getJobs = async (req, res) => {
       companyName: job.companyName || job.employer?.companyName || 'N/A',
       location: job.location,
       jobType: Array.isArray(job.jobType) ? job.jobType.join(', ') : job.jobType,
-      minimumSalary: job.salary?.min || 0,
-      maximumSalary: job.salary?.max || 0,
+      salary: job.salary || 0,
       applicationDeadline: job.applicationDeadline ? new Date(job.applicationDeadline).toISOString().split('T')[0] : 'N/A',
       status: job.status,
       jobUrl: `/admin/jobs/${job._id}`,
@@ -1399,10 +1398,7 @@ exports.getJobDetails = async (req, res) => {
     }
 
     // Transform job data to match frontend expectations
-    const salaryValue =
-      typeof job.salary === "number"
-        ? job.salary
-        : job.salary?.min || job.salary?.max || 0;
+    const salaryValue = typeof job.salary === "number" ? job.salary : 0;
 
     const jobDetails = {
       id: job._id.toString(),
@@ -1413,8 +1409,6 @@ exports.getJobDetails = async (req, res) => {
       experienceLevel: job.experienceLevel || "",
       nationality: job.nationality || "",
       salary: salaryValue,
-      minimumSalary: typeof job.salary === "object" ? job.salary?.min || 0 : salaryValue,
-      maximumSalary: typeof job.salary === "object" ? job.salary?.max || 0 : salaryValue,
       applicationDeadline: job.applicationDeadline
         ? new Date(job.applicationDeadline).toISOString().split("T")[0]
         : "N/A",
@@ -2709,6 +2703,7 @@ exports.getFilterSearchJobseekers = async (req, res) => {
       nationality,
       minSalary,
       maxSalary,
+      salary,
       location,
       role,
       spokenLanguages,
@@ -2805,17 +2800,14 @@ exports.getFilterSearchJobseekers = async (req, res) => {
       }
     }
 
-    if (minSalary || maxSalary) {
-      const salaryConds = [];
-      if (minSalary) {
-        salaryConds.push({ 'jobPreferences.salaryExpectation': { $regex: escapeRegex(minSalary), $options: 'i' } });
-      }
-      if (maxSalary) {
-        salaryConds.push({ 'jobPreferences.salaryExpectation': { $regex: escapeRegex(maxSalary), $options: 'i' } });
-      }
-      if (salaryConds.length > 0) {
-        andConditions.push({ $or: salaryConds });
-      }
+    const salaryFilter = salary || minSalary || maxSalary;
+    if (salaryFilter) {
+      andConditions.push({
+        "jobPreferences.salaryExpectation": {
+          $regex: escapeRegex(String(salaryFilter)),
+          $options: "i",
+        },
+      });
     }
 
     if (andConditions.length > 0) {

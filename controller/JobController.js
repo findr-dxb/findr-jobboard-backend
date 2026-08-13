@@ -19,6 +19,20 @@ const {
   isEmployerVisibleStatus,
 } = require("../utils/applicationVisibility");
 
+function normalizeJobSalaryInput(salary) {
+  if (typeof salary === "number" && Number.isFinite(salary)) return salary;
+  if (typeof salary === "string") {
+    const parsed = parseFloat(String(salary).replace(/[^0-9.]/g, ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (salary && typeof salary === "object") {
+    if (typeof salary.amount === "number") return salary.amount;
+    if (typeof salary.min === "number") return salary.min;
+    if (typeof salary.max === "number") return salary.max;
+  }
+  return 0;
+}
+
 exports.createJob = async (req, res) => {
   try {
     const employerId = req.user?.id;
@@ -68,16 +82,7 @@ exports.createJob = async (req, res) => {
       return res.status(400).json({ message: deadlineCheck.message });
     }
 
-    let salaryAmount = req.body.salary;
-    if (req.body.salary && typeof req.body.salary === "object") {
-      if (req.body.salary.min !== undefined) {
-        salaryAmount = req.body.salary.min;
-      } else if (req.body.salary.max !== undefined) {
-        salaryAmount = req.body.salary.max;
-      } else if (req.body.salary.amount !== undefined) {
-        salaryAmount = req.body.salary.amount;
-      }
-    }
+    const salaryAmount = normalizeJobSalaryInput(req.body.salary);
 
     const expiredDate = new Date();
     expiredDate.setMonth(expiredDate.getMonth() + 1);
@@ -220,17 +225,9 @@ exports.updateJob = async (req, res) => {
         .json({ message: "Not authorized to update this job" });
     }
 
-    // Handle salary: convert from min/max object to single amount if needed
     const updateData = { ...req.body };
-    if (req.body.salary && typeof req.body.salary === "object") {
-      // If salary is an object with min/max, use min (or average if both exist)
-      if (req.body.salary.min !== undefined) {
-        updateData.salary = req.body.salary.min;
-      } else if (req.body.salary.max !== undefined) {
-        updateData.salary = req.body.salary.max;
-      } else if (req.body.salary.amount !== undefined) {
-        updateData.salary = req.body.salary.amount;
-      }
+    if (req.body.salary !== undefined) {
+      updateData.salary = normalizeJobSalaryInput(req.body.salary);
     }
 
     if (updateData.applicationDeadline !== undefined) {
