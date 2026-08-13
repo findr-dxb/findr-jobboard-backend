@@ -1019,8 +1019,6 @@ exports.getJobs = async (req, res) => {
   }
 };
 
-// Admin Applications Endpoint - Get all applications
-// Get all applications for admin panel
 exports.getApplications = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -1030,10 +1028,12 @@ exports.getApplications = async (req, res) => {
     const sortOrder = req.query.sortOrder === "asc" ? 1 : -1;
     const skip = (page - 1) * limit;
 
-    // Build filter
     const filter = {};
 
-    // Filter by status (skip if "all")
+    if (req.query.jobId) {
+      filter.jobId = req.query.jobId;
+    }
+
     if (status && status !== "all") {
       if (status === "rejected") {
         filter.status = { $in: ["rejected", "admin_rejected"] };
@@ -1045,7 +1045,7 @@ exports.getApplications = async (req, res) => {
     // Fetch applications
     const applications = await Application.find(filter)
       .populate("jobId", "title companyName")
-      .populate("applicantId", "name fullName email profilePicture")
+      .populate("applicantId", "name fullName email profilePicture phoneNumber")
       .sort({ [sortBy]: sortOrder })
       .skip(skip)
       .limit(limit)
@@ -1100,6 +1100,9 @@ exports.getApplications = async (req, res) => {
         companyName: app.jobId?.companyName || "",
         status: app.status,
         appliedDate: app.appliedDate,
+        phone: app.applicantId?.phoneNumber || "N/A",
+        email: app.applicantId?.email || "N/A",
+        resume: app.resume || "",
         applicationUrl: app.applicantId?._id
           ? `/admin/users/jobseeker/${app.applicantId._id}`
           : `/admin/jobs/${app.jobId?._id || ""}`,
