@@ -99,13 +99,11 @@ async function uploadToSupabase(buffer, filename, folder, mimetype) {
       .from(BUCKET_NAME)
       .getPublicUrl(filePath);
 
-    // Format response to match Cloudinary format (for frontend compatibility)
     const resourceType = getResourceType(mimetype);
     const format = fileExt.replace(".", "").toLowerCase();
 
     return {
       url: urlData.publicUrl,
-      secure_url: urlData.publicUrl,
       public_id: filePath,
       original_filename: filename,
       format: format,
