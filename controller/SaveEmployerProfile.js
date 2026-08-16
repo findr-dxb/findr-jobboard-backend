@@ -91,7 +91,9 @@ exports.getEmployerProfileDetails = async (req, res) => {
         subscriptionPlan: publicProfile.subscriptionPlan || "free",
         subscriptionStatus: publicProfile.subscriptionStatus || "inactive",
         subscriptionExpiry: publicProfile.subscriptionExpiry || null,
-        verificationStatus: publicProfile.verificationStatus || "pending",
+        verificationStatus: publicProfile.documents?.businessLicense?.trim()
+          ? "verified"
+          : "pending",
         
         // Documents
         documents: {
@@ -148,7 +150,12 @@ exports.updateEmployerProfile = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized. Please login first." });
     }
 
-    const updateData = req.body;
+    const existingEmployer = await Employer.findById(employerId);
+    if (!existingEmployer) {
+      return res.status(404).json({ message: "Employer not found" });
+    }
+
+    const updateData = { ...req.body };
     
     // Remove sensitive fields that shouldn't be updated via this endpoint
     delete updateData.password;
@@ -157,6 +164,19 @@ exports.updateEmployerProfile = async (req, res) => {
     delete updateData.applications;
     delete updateData.postedJobs;
     delete updateData.activeJobs;
+
+    if (updateData.documents && typeof updateData.documents === "object") {
+      updateData.documents = {
+        ...(existingEmployer.documents?.toObject?.() || existingEmployer.documents || {}),
+        ...updateData.documents,
+      };
+    }
+
+    const businessLicense =
+      updateData.documents?.businessLicense ?? existingEmployer.documents?.businessLicense;
+    updateData.verificationStatus = businessLicense && String(businessLicense).trim()
+      ? "verified"
+      : "pending";
 
     const updatedEmployer = await Employer.findByIdAndUpdate(
       employerId,
@@ -196,7 +216,7 @@ exports.getPublicCompanyProfile = async (req, res) => {
     }
 
     const employer = await Employer.findById(employerId)
-      .select('-password -applications -postedJobs -activeJobs -subscriptionPlan -subscriptionStatus -subscriptionExpiry -documents -hrServices -notifications -points -profileCompleted');
+      .select('-password -applications -postedJobs -activeJobs -subscriptionPlan -subscriptionStatus -subscriptionExpiry -hrServices -notifications -points -profileCompleted');
     
     if (!employer) {
       return res.status(404).json({ 
@@ -221,7 +241,7 @@ exports.getPublicCompanyProfile = async (req, res) => {
         officeAddress: employer.companyLocation || "",
       },
       website: employer.website || "",
-      verified: employer.verificationStatus === "verified",
+      verified: Boolean(employer.documents?.businessLicense?.trim()),
       logo: employer.companyLogo || "",
       socialLinks: {
         linkedin: employer.socialLinks?.linkedin || "",
