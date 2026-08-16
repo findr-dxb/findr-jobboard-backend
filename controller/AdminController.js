@@ -183,6 +183,7 @@ exports.getUsers = async (req, res) => {
           { name: { $regex: search, $options: 'i' } },
           { fullName: { $regex: search, $options: 'i' } },
           { email: { $regex: search, $options: 'i' } },
+          { phoneNumber: { $regex: search, $options: 'i' } },
           { location: { $regex: search, $options: 'i' } },
           { nationality: { $regex: search, $options: 'i' } },
           { 'professionalExperience.currentRole': { $regex: search, $options: 'i' } },
@@ -228,6 +229,7 @@ exports.getUsers = async (req, res) => {
           { companyName: { $regex: search, $options: 'i' } },
           { email: { $regex: search, $options: 'i' } },
           { companyEmail: { $regex: search, $options: 'i' } },
+          { phoneNumber: { $regex: search, $options: 'i' } },
           { industry: { $regex: search, $options: 'i' } },
           { website: { $regex: search, $options: 'i' } },
           { companyLocation: { $regex: search, $options: 'i' } }
