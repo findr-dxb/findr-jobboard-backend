@@ -7,6 +7,7 @@ const Admin = require("../model/AdminSchema");
 const Grievance = require("../model/Grievance");
 const EmployerRmPostingRequest = require("../model/EmployerRmPostingRequestSchema");
 const jwt = require("jsonwebtoken");
+const { parseSalary } = require("../utils/jobseekerMembership");
 
 /** Calendar day bounds in Asia/Dubai (Findr marketplace timezone). */
 function getDubaiDayBounds(date = new Date()) {
@@ -2705,7 +2706,6 @@ exports.getFilterSearchJobseekers = async (req, res) => {
       nationality,
       minSalary,
       maxSalary,
-      salary,
       location,
       role,
       spokenLanguages,
@@ -2802,31 +2802,29 @@ exports.getFilterSearchJobseekers = async (req, res) => {
       }
     }
 
-    const salaryFilter = salary || minSalary || maxSalary;
-    if (salaryFilter) {
-      andConditions.push({
-        "jobPreferences.salaryExpectation": {
-          $regex: escapeRegex(String(salaryFilter)),
-          $options: "i",
-        },
+    const min = Number(minSalary);
+    const max = Number(maxSalary);
+
+    if (andConditions.length > 0) query.$and = andConditions;
+
+    let users = await FindrUser.find(query)
+      .select("-password -__v")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (Number.isFinite(min) || Number.isFinite(max)) {
+      users = users.filter((user) => {
+        const amount = parseSalary(user.jobPreferences?.salaryExpectation);
+        if (amount === null) return false;
+        if (Number.isFinite(min) && amount < min) return false;
+        if (Number.isFinite(max) && amount > max) return false;
+        return true;
       });
     }
 
-    if (andConditions.length > 0) {
-      query.$and = andConditions;
-    }
-
+    const totalCount = users.length;
     const skip = (pageNum - 1) * limitNum;
-
-    const [users, totalCount] = await Promise.all([
-      FindrUser.find(query)
-        .select('-password -__v')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limitNum)
-        .lean(),
-      FindrUser.countDocuments(query)
-    ]);
+    users = users.slice(skip, skip + limitNum);
 
     const transformedUsers = users.map(user => ({
       id: user._id.toString(),
