@@ -8,8 +8,8 @@ const {
 } = require("../utils/jobseekerMembership");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const { isStrongPassword, PASSWORD_RULE_MESSAGE } = require("../utils/passwordValidation");
 require("dotenv").config();
-
 
 const generateReferralCode = (userName) => {
   const namePart = userName
@@ -26,6 +26,12 @@ const generateReferralCode = (userName) => {
 exports.signup = async (req, res) => {
   try {
     const { email, password, role, referralCode, ...otherData } = req.body;
+
+    if (!isStrongPassword(password)) {
+      return res.status(400).json({
+        message: PASSWORD_RULE_MESSAGE,
+      });
+    }
 
     // Validate role
     if (role !== "jobseeker" && role !== "employer") {
@@ -918,6 +924,13 @@ exports.resetPassword = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Token and password are required"
+      });
+    }
+
+    if (!isStrongPassword(password)) {
+      return res.status(400).json({
+        success: false,
+        message: PASSWORD_RULE_MESSAGE,
       });
     }
 
