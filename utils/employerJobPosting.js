@@ -1,6 +1,6 @@
 const Job = require("../model/JobSchema");
 
-const COOLDOWN_DAYS = 15;
+const COOLDOWN_DAYS = 30;
 const COOLDOWN_MS = COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
 
 function endOfUtcDay(dateInput) {

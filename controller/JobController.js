@@ -237,6 +237,7 @@ exports.updateJob = async (req, res) => {
       }
 
       updateData.applicationDeadline = deadlineCheck.deadline;
+      updateData.expiredDate = deadlineCheck.deadline;
 
       const deadlineDay = utcStartOfDay(deadlineCheck.deadline);
       const todayStart = utcStartOfDay(new Date());
